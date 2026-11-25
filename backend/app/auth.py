@@ -32,13 +32,16 @@ SCOPES = {
     "atoms:approve": "Approve or reject change requests (atoms and forms)",
     "forms:read": "Search and read forms, their versions, and check answers",
     "forms:write": "Create forms, edit drafts and submit them for review",
+    "records:read": "Search and read records (saved answers to forms) and their history",
+    "records:write": "Create, edit, archive and restore records",
     "schema:admin": "Edit field definitions and relation types, publish the schema",
     "users:admin": "Manage users and their tokens",
 }
 ROLE_SCOPES = {
-    "viewer": {"atoms:read", "forms:read"},
-    "editor": {"atoms:read", "atoms:write", "forms:read", "forms:write"},
+    "viewer": {"atoms:read", "forms:read", "records:read"},
+    "atom_editor": {"atoms:read", "atoms:write", "forms:read", "forms:write"},
     "reviewer": {"atoms:read", "atoms:approve", "forms:read"},
+    "record_manager": {"atoms:read", "forms:read", "records:read", "records:write"},
     "admin": set(SCOPES),
 }
 ROLES = tuple(ROLE_SCOPES)

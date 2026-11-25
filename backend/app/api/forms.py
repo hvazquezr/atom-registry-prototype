@@ -131,6 +131,7 @@ def form_versions(form_id: str, db: Session = Depends(get_db), _: Principal = De
     summary="The resolved form, ready to render",
     description=(
         "`version` is a number, `latest` or `draft`. Each item carries its answer key, label, help text, "
+        "`requirement` (required, optional, required_if or calculated), "
         "input type and rules, the pinned atom revision and values, its Required if conditions, and the "
         "item it is grouped under (Includes)."
     ),
@@ -141,7 +142,7 @@ def form_version(form_id: str, version: str, db: Session = Depends(get_db), _: P
         definition, issues = form_service.resolve(db, form)
         return dict(definition, version="draft", draft_revision=form.draft_revision, issues=issues)
     fv = form_service.get_version(db, form, version)
-    return dict(fv.definition, status=form.status, notes=fv.notes)
+    return dict(form_service.with_requirements(dict(fv.definition)), status=form.status, notes=fv.notes)
 
 
 @router.post(

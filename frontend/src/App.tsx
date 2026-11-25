@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
-import { api, type ChangeRequest } from './api'
+import { api, ROLE_LABELS, type ChangeRequest } from './api'
 import { useAuth } from './auth'
 import AtomDetail from './pages/AtomDetail'
 import AtomEdit from './pages/AtomEdit'
@@ -10,6 +10,8 @@ import FormBuilder from './pages/FormBuilder'
 import FormList from './pages/FormList'
 import Login from './pages/Login'
 import MyRequests from './pages/MyRequests'
+import RecordEdit from './pages/RecordEdit'
+import RecordList from './pages/RecordList'
 import RelationTypes from './pages/RelationTypes'
 import ReviewQueue from './pages/ReviewQueue'
 import SchemaAdmin from './pages/SchemaAdmin'
@@ -42,6 +44,7 @@ export default function App() {
           <NavLink to="/atoms" end>Atoms</NavLink>
           {can('atoms:write') && <NavLink to="/atoms/new">New atom</NavLink>}
           {can('forms:read') && <NavLink to="/forms">Forms</NavLink>}
+          {can('records:read') && <NavLink to="/records">Records</NavLink>}
           {can('atoms:write') && <NavLink to="/requests">My requests</NavLink>}
           {can('atoms:approve') && (
             <NavLink to="/review">
@@ -58,19 +61,22 @@ export default function App() {
         </nav>
         <div className="me">
           <div>{me.display_name}</div>
-          <div className="muted small">{me.roles.join(', ')}</div>
+          <div className="muted small">{me.roles.map((r) => ROLE_LABELS[r] ?? r).join(', ')}</div>
           <button className="link" onClick={logout}>Sign out</button>
         </div>
       </aside>
       <main className="content">
         <Routes>
-          <Route path="/" element={<Navigate to="/atoms" replace />} />
+          <Route path="/" element={<Navigate to={can('records:write') && !can('atoms:write') ? '/records' : '/atoms'} replace />} />
           <Route path="/atoms" element={<AtomList />} />
           <Route path="/atoms/new" element={<AtomEdit />} />
           <Route path="/atoms/:id" element={<AtomDetail />} />
           <Route path="/atoms/:id/edit" element={<AtomEdit />} />
           <Route path="/forms" element={<FormList />} />
           <Route path="/forms/:id" element={<FormBuilder />} />
+          <Route path="/records" element={<RecordList />} />
+          <Route path="/records/new" element={<RecordEdit />} />
+          <Route path="/records/:id" element={<RecordEdit />} />
           <Route path="/requests" element={<MyRequests />} />
           <Route path="/requests/:id" element={<ChangeRequestPage />} />
           <Route path="/review" element={<ReviewQueue />} />

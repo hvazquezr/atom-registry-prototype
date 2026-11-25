@@ -18,3 +18,10 @@ export function formatDate(iso: string | null | undefined): string {
   const d = new Date(iso)
   return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 }
+
+export function showValue(v: unknown): string {
+  if (v === undefined || v === null || v === '') return ''
+  if (typeof v === 'boolean') return v ? 'Yes' : 'No'
+  if (Array.isArray(v)) return v.join(', ')
+  return String(v)
+}

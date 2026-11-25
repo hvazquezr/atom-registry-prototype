@@ -3,7 +3,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api import forms, internal, v1
+from app.api import forms, internal, records, v1
 from app.config import get_settings
 from app.errors import AppError
 
@@ -12,8 +12,13 @@ app = FastAPI(
     version="0.1.0",
     description=(
         "Registry of atoms: data elements defined by a configurable schema, linked by typed relations, "
-        "and changed only through reviewed change requests. Authenticate with `Authorization: Bearer <token>`."
+        "and changed only through reviewed change requests. Records hold saved answers to published forms. Authenticate with `Authorization: Bearer <token>`."
     ),
+    openapi_tags=[
+        {"name": "data", "description": "Records of one form, addressed by the form's key: /api/v1/data/{form_key}. "
+                                        "Saved answers to a published form, checked on every save, with full history."},
+        {"name": "records", "description": "The same records without the form in the path, including search across all forms."},
+    ],
 )
 
 app.add_middleware(
@@ -50,4 +55,6 @@ def health():
 
 app.include_router(v1.router)
 app.include_router(forms.router)
+app.include_router(records.data_router)
+app.include_router(records.router)
 app.include_router(internal.router)
