@@ -164,3 +164,23 @@ def test_roles_and_form_rules(person, editor, reviewer, records, admin, client, 
     draft_only = make_form(editor, [item(make_atom({"name": "Thing"}))], key="draft_only")
     r = records.post("/api/v1/records", json={"form": draft_only["key"], "answers": {}})
     assert r.status_code == 409 and r.json()["error"]["code"] == "form_not_published"
+
+
+def test_form_scoped_routes(person, editor, records, make_atom):
+    base = "/api/v1/forms/person/records"
+    r = records.post(base, json={"answers": {"first_name": "Ada", "income": 900}})
+    assert r.status_code == 201, r.text
+    rec = r.json()
+    assert rec["form"]["key"] == "person" and r.headers["Location"] == f"/api/v1/records/{rec['id']}"
+    assert records.get(base, params={"filter[income][gt]": "500"}).json()["total"] == 1
+    assert records.get(f"{base}/{rec['id']}").json()["id"] == rec["id"]
+    r = records.patch(f"{base}/{rec['id']}", headers={"If-Match": '"1"'}, json={"answers": {"last_name": "Lovelace"}})
+    assert r.status_code == 200 and r.json()["complete"]
+    assert len(records.get(f"{base}/{rec['id']}/revisions").json()) == 2
+    assert records.post(f"{base}/{rec['id']}/archive", json={}).json()["status"] == "archived"
+    assert records.post(f"{base}/{rec['id']}/restore", json={}).json()["status"] == "active"
+
+    # A record is only found under its own form.
+    other = make_form(editor, [item(make_atom({"name": "Thing"}))], key="other")
+    assert records.get(f"/api/v1/forms/{other['key']}/records/{rec['id']}").status_code == 404
+    assert records.get("/api/v1/forms/nope/records").status_code == 404

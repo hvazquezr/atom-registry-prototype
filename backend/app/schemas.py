@@ -220,6 +220,10 @@ class RecordCreate(BaseModel):
     answers: dict[str, Any] = Field(default_factory=dict, description="Answers keyed by question key. Required ones can be left out for now.")
 
 
+class RecordAnswers(BaseModel):
+    answers: dict[str, Any] = Field(default_factory=dict, description="Answers keyed by question key. Required ones can be left out for now.")
+
+
 class RecordPatch(BaseModel):
     answers: dict[str, Any] = Field(default_factory=dict, description="Only the answers that change; null clears one.")
     form_version: Literal["latest"] | None = Field(None, description="Set to latest to move the record to the form's latest version.")

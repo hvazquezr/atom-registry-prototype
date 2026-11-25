@@ -179,20 +179,26 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
 ```
 
 ```bash
-# records: saved against the form's latest version; missing required answers are allowed
+# records: each form's records live under /api/v1/forms/<form key>/records.
+# A new record is saved against the form's latest version; missing required answers are allowed.
 curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  localhost:8000/api/v1/records -d '{"form": "person_details", "answers": {"first_name": "Grace"}}'
+  localhost:8000/api/v1/forms/person_details/records -d '{"answers": {"first_name": "Grace"}}'
 # → 201 {"id": "...", "form_version": 1, "complete": false, "missing": ["last_name"], ...}
+
+# search a form's records by text and answers
+curl -H "Authorization: Bearer $TOKEN" \
+  "localhost:8000/api/v1/forms/person_details/records?q=hopper&filter[annual_income][gte]=50000&complete=true"
 
 # change some answers (null clears one), or move to the latest form version with "form_version": "latest"
 curl -X PATCH -H "Authorization: Bearer $TOKEN" -H "If-Match: 1" -H "Content-Type: application/json" \
-  localhost:8000/api/v1/records/<uuid> -d '{"answers": {"last_name": "Hopper"}}'
+  localhost:8000/api/v1/forms/person_details/records/<uuid> -d '{"answers": {"last_name": "Hopper"}}'
 
-# search one form's records by text and answers; history; archive and restore
-curl -H "Authorization: Bearer $TOKEN" \
-  "localhost:8000/api/v1/records?form=person_details&q=hopper&filter[annual_income][gte]=50000&complete=true"
-curl -H "Authorization: Bearer $TOKEN" localhost:8000/api/v1/records/<uuid>/revisions
-curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" localhost:8000/api/v1/records/<uuid>/archive -d '{}'
+# history; archive and restore
+curl -H "Authorization: Bearer $TOKEN" localhost:8000/api/v1/forms/person_details/records/<uuid>/revisions
+curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  localhost:8000/api/v1/forms/person_details/records/<uuid>/archive -d '{}'
+
+# the same routes also exist without the form, for searching across forms: /api/v1/records?q=...
 ```
 
 Filter operators: `eq` (default), `ne`, `in` (comma-separated), `gt`, `gte`, `lt`, `lte`,
