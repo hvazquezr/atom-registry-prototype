@@ -250,6 +250,7 @@ export interface ResolvedItem {
   label: string
   help_text: string
   required: boolean
+  requirement: 'required' | 'optional' | 'required_if' | 'calculated'
   input: FormInput
   atom_values: Values
   conditions: FormCondition[]

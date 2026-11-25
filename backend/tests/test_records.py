@@ -184,3 +184,11 @@ def test_form_scoped_routes(person, editor, records, make_atom):
     other = make_form(editor, [item(make_atom({"name": "Thing"}))], key="other")
     assert records.get(f"/api/v1/data/{other['key']}/{rec['id']}").status_code == 404
     assert records.get("/api/v1/data/nope").status_code == 404
+
+
+def test_forms_say_which_questions_are_required(person, records):
+    items = records.get("/api/v1/forms/person/versions/latest").json()["sections"][0]["items"]
+    assert {i["key"]: i["requirement"] for i in items} == {
+        "first_name": "required", "last_name": "required", "has_middle_name": "optional",
+        "middle_name": "required_if", "income": "optional", "date_of_birth": "optional", "age": "calculated",
+    }

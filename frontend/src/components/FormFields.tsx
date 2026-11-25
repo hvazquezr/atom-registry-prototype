@@ -15,7 +15,7 @@ function BooleanInput({ item, value, required, error, disabled, onChange }: {
 }) {
   return (
     <div className={`form-field ${error ? 'has-error' : ''}`}>
-      <label>{item.label}{required && <span className="req"> *</span>}</label>
+      <label>{item.label}{required ? <span className="req"> *</span> : <span className="opt">optional</span>}</label>
       {item.help_text && <div className="muted small">{item.help_text}</div>}
       <div className="row">
         {[true, false].map((v) => (
@@ -71,7 +71,7 @@ export default function FormFields({ definition, answers, check, errors, readOnl
               return (
                 <div key={it.key} className={`preview-item ${it.parent ? 'child' : ''}`}>
                   <div className="form-field">
-                    <label>{it.label}{required && <span className="req"> *</span>}</label>
+                    <label>{it.label}{required ? <span className="req"> *</span> : <span className="opt">optional</span>}</label>
                     <div className="calc-value">{v || <span className="muted">Not answered</span>}</div>
                   </div>
                 </div>
@@ -82,7 +82,7 @@ export default function FormFields({ definition, answers, check, errors, readOnl
                 {it.input.type === 'boolean' ? (
                   <BooleanInput item={it} value={answers[it.key]} required={required} error={errors[it.key]} onChange={(v) => onChange(it.key, v)} />
                 ) : (
-                  <FieldInput field={asField(it, required)} value={answers[it.key]} error={errors[it.key]} onChange={(v) => onChange(it.key, v)} />
+                  <FieldInput field={asField(it, required)} value={answers[it.key]} error={errors[it.key]} markOptional onChange={(v) => onChange(it.key, v)} />
                 )}
               </div>
             )

@@ -15,6 +15,11 @@ token-protected API to search, read, create and update them.
   *Includes* groups atoms under their parent, and *Required if* hides an atom until another answer
   meets the link's condition (e.g. `value == true`). Published versions are frozen, pinning each atom's
   revision.
+- **Required or optional.** The form decides, not the atom: each question on a form is marked
+  *Required* or *Optional* (the default) with a switch on its row in the builder. Questions with a
+  *Required if* link are required only when their condition holds, and calculated ones are never asked;
+  both are shown as locked labels. The resolved form gives each question a `requirement`: `required`,
+  `optional`, `required_if` or `calculated`.
 - **Calculated atoms.** An atom with a **Formula** gets its answer on a form from other atoms' answers.
   Refer to other atoms with `@` and their name in lowercase with underscores, e.g. `@weight / (@height * @height)`;
   typing `@` in the formula box suggests atoms. When the atom is approved, each `@name` becomes a

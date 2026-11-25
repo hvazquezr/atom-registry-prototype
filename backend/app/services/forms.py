@@ -503,6 +503,7 @@ def resolve(db: Session, form: Form) -> tuple[dict, list[dict]]:
             }
             if calculation:
                 out_item["calculation"] = calculation
+            out_item["requirement"] = requirement(out_item)
             out_items.append(out_item)
         sections_out.append({"title": s.title, "description": s.description, "items": out_items})
 
@@ -534,6 +535,23 @@ def _never_shown(items: list[dict]) -> list[str]:
                 reachable.add(i["key"])
                 changed = True
     return [i["key"] for i in items if i["key"] not in reachable]
+
+
+def requirement(item: dict) -> str:
+    """How the form treats an answer: required, optional, required_if (a Required if link) or calculated."""
+    if item.get("calculation"):
+        return "calculated"
+    if item.get("conditions"):
+        return "required_if"
+    return "required" if item.get("required") else "optional"
+
+
+def with_requirements(definition: dict) -> dict:
+    """Fill in `requirement` on versions published before it existed."""
+    for s in definition.get("sections", []):
+        for i in s.get("items", []):
+            i.setdefault("requirement", requirement(i))
+    return definition
 
 
 def has_errors(issues: list[dict]) -> bool:

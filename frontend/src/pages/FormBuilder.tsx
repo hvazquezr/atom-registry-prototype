@@ -104,8 +104,6 @@ function ItemRow({
               <strong>{item.label || name}</strong>
               {item.label && <span className="muted small"> ({name})</span>}
               {resolved && <span className="pill gray">{ANSWER_LABELS[resolved.input.answer_type] ?? resolved.input.answer_type}</span>}
-              {item.required && <span className="pill blue">required</span>}
-              {conditional && <span className="pill warn">conditional</span>}
               {calc && <span className="pill blue" title={calc.formula}>calculated</span>}
               {resolved?.atom_status === 'deprecated' && <span className="pill rejected">deprecated atom</span>}
             </div>
@@ -119,6 +117,18 @@ function ItemRow({
           </div>
         </div>
         <div className="row">
+          {calc ? (
+            <span className="requirement locked" title="Calculated answers are never asked, so they're neither required nor optional.">Calculated</span>
+          ) : conditional ? (
+            <span className="requirement locked" title="Set by the atom's Required if link.">Required if</span>
+          ) : editable ? (
+            <div className="segmented" role="group" aria-label="Required or optional">
+              <button className={item.required ? 'on' : ''} aria-pressed={item.required} onClick={() => !item.required && onChange({ required: true }, true)}>Required</button>
+              <button className={!item.required ? 'on' : ''} aria-pressed={!item.required} onClick={() => item.required && onChange({ required: false }, true)}>Optional</button>
+            </div>
+          ) : (
+            <span className={`requirement ${item.required ? 'req' : ''}`}>{item.required ? 'Required' : 'Optional'}</span>
+          )}
           <Link to={`/atoms/${item.atom_id}`} className="small">Atom</Link>
           {editable && (
             <>
@@ -147,13 +157,6 @@ function ItemRow({
             <textarea rows={2} value={item.help_text} placeholder={String(resolved?.atom_values.description ?? '')}
               onChange={(e) => onChange({ help_text: e.target.value }, false)} onBlur={() => onChange({}, true)} />
           </div>
-          <label className="check">
-            <input type="checkbox" checked={item.required} disabled={(conditional || !!calc) && !item.required}
-              onChange={(e) => onChange({ required: e.target.checked }, true)} />
-            Always required on this form
-            {conditional && <span className="muted small"> (not available: this atom is Required if another answer)</span>}
-            {calc && <span className="muted small"> (not available: this atom is calculated)</span>}
-          </label>
         </div>
       )}
     </div>
