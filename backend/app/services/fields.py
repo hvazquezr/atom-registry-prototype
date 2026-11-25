@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.errors import AppError, ValidationFailed, bad_request, conflict, field_error, not_found
 from app.models import FieldDefinition, SchemaVersion, User
-from app.services import expressions
+from app.services import expressions, natural_keys
 from app.services.validation import FIELD_TYPES, LIST_ITEM_TYPES, validate_value
 
 KEY_PATTERN = re2.compile(r"[a-z][a-z0-9_]{0,63}")
@@ -48,6 +48,7 @@ def field_to_dict(f: FieldDefinition) -> dict:
         "status": f.status,
         "system": f.system,
         "published": f.published,
+        "natural_key": f.natural_key,
     }
 
 
@@ -188,6 +189,8 @@ def check_definition(field: dict, fields: list[dict]) -> tuple[list[dict], dict 
                 errors.append(field_error("expression", exc.code, exc.message))
     elif field.get("expression"):
         errors.append(field_error("expression", "not_calculated", "Only calculated fields have an expression."))
+    if field.get("natural_key") and (msg := natural_keys.field_problem(field)):
+        errors.append(field_error("natural_key", "not_allowed", msg))
     return errors, info
 
 
@@ -246,11 +249,13 @@ def save_field(db: Session, data: dict, field_id: uuid.UUID | None = None) -> Fi
             "key": data.get("key"), "label": data.get("label"), "description": data.get("description") or "",
             "type": data.get("type"), "required": bool(data.get("required")), "config": data.get("config") or {},
             "calculated": bool(data.get("calculated")), "expression": data.get("expression"),
-            "status": "active", "depends_on": [],
+            "natural_key": bool(data.get("natural_key")), "status": "active", "depends_on": [],
             "position": data.get("position") if data.get("position") is not None else len(existing_rows),
         }
     if not merged.get("calculated"):
         merged["expression"] = None
+    if merged.get("natural_key"):
+        merged["required"] = True  # a key part can't be left empty
 
     others = [field_to_dict(r) for r in existing_rows if r.id != field_id]
     errors, info = check_definition(merged, [o for o in others if o["status"] == "active"])
@@ -269,6 +274,7 @@ def save_field(db: Session, data: dict, field_id: uuid.UUID | None = None) -> Fi
     row.description = merged.get("description") or ""
     row.type = merged["type"]
     row.required = bool(merged.get("required"))
+    row.natural_key = bool(merged.get("natural_key"))
     row.config = merged.get("config") or {}
     row.calculated = bool(merged.get("calculated"))
     row.expression = merged.get("expression")
@@ -331,7 +337,7 @@ def reorder(db: Session, keys: list[str]) -> list[FieldDefinition]:
 # --- Publishing -------------------------------------------------------------------------
 
 SNAPSHOT_KEYS = ("key", "label", "description", "type", "required", "config", "calculated",
-                 "expression", "depends_on", "time_dependent", "position")
+                 "expression", "depends_on", "time_dependent", "position", "natural_key")
 
 
 def snapshot(rows: list[FieldDefinition]) -> list[dict]:
@@ -360,7 +366,8 @@ def draft_changes(db: Session) -> dict:
     """What publishing now would change compared to the latest published schema."""
     current = {f["key"]: f for f in snapshot(list_fields(db))}
     latest = latest_schema(db)
-    published = {f["key"]: f for f in (latest.fields if latest else [])}
+    # Schemas published before natural keys existed have no natural_key setting: read it as off.
+    published = {f["key"]: {"natural_key": False} | f for f in (latest.fields if latest else [])}
     added = sorted(set(current) - set(published))
     removed = sorted(set(published) - set(current))
     changed = sorted(k for k in set(current) & set(published) if current[k] != published[k])
@@ -386,8 +393,11 @@ def publish(db: Session, user: User | None, notes: str = "") -> tuple[SchemaVers
     changes = draft_changes(db)
     if changes["latest_version"] is not None and not changes["has_changes"]:
         raise conflict("no_changes", "The draft is the same as the latest published schema.")
+    fields = snapshot(rows)
+    # Key every atom by the new fields first; refused if atoms would clash or miss a key.
+    natural_keys.reassign_atom_keys(db, fields)
     next_version = (db.scalar(select(func.max(SchemaVersion.version))) or 0) + 1
-    sv = SchemaVersion(version=next_version, fields=snapshot(rows), notes=notes, published_by=user.id if user else None)
+    sv = SchemaVersion(version=next_version, fields=fields, notes=notes, published_by=user.id if user else None)
     db.add(sv)
     for r in rows:
         if r.status == "active":

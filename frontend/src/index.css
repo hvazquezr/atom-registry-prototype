@@ -113,6 +113,7 @@ fieldset { border: none; padding: 0; margin: 0; }
 .pill.pending, .pill.warn { background: #fdf3e1; color: var(--warn); }
 .pill.approved { background: #e5f4ea; color: var(--ok); }
 .pill.rejected { background: #fbeaea; color: var(--danger); }
+.pill.key { background: #f1eafc; color: #6b3fb3; }
 .pill.withdrawn, .pill.gray { background: #eef0f3; color: var(--muted); }
 .chips { display: inline-flex; flex-wrap: wrap; gap: 4px; }
 .chip { background: #eef1f6; border-radius: 12px; padding: 1px 9px; font-size: 12.5px; display: inline-flex; align-items: center; gap: 4px; }

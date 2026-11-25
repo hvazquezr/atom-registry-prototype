@@ -19,6 +19,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TSVECTOR, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -95,6 +96,8 @@ class FieldDefinition(TimestampMixin, Base):
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
     system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Part of the natural key that identifies an atom (several fields make a combined key).
+    natural_key: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     # Set once the field has appeared in a published schema; its key is frozen after that.
     published: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
@@ -142,6 +145,8 @@ class Atom(TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     search_vector: Mapped[str | None] = mapped_column(TSVECTOR)
+    # The natural key's values, normalized (see services/natural_keys.py). Unique across atoms.
+    natural_key: Mapped[str | None] = mapped_column(Text)
     created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.id"))
     updated_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.id"))
 
@@ -149,6 +154,7 @@ class Atom(TimestampMixin, Base):
         Index("ix_atom_values", "values", postgresql_using="gin", postgresql_ops={"values": "jsonb_path_ops"}),
         Index("ix_atom_search", "search_vector", postgresql_using="gin"),
         Index("ix_atom_status", "status"),
+        Index("ux_atom_natural_key", "natural_key", unique=True, postgresql_where=text("natural_key IS NOT NULL")),
     )
 
 
@@ -278,6 +284,8 @@ class FormItem(Base):
     label: Mapped[str] = mapped_column(String(200), nullable=False, default="")
     help_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
     required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Part of the natural key of the form's records. Key questions are always required.
+    natural_key: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
     section: Mapped[FormSection] = relationship(back_populates="items")
 
@@ -339,12 +347,16 @@ class Record(TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")  # active | archived
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     search_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # The answers to the form's key questions, normalized. Unique within the form.
+    natural_key: Mapped[str | None] = mapped_column(Text)
     created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.id"))
     updated_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.id"))
 
     __table_args__ = (
         Index("ix_record_answers", "answers", postgresql_using="gin", postgresql_ops={"answers": "jsonb_path_ops"}),
         Index("ix_record_form_status", "form_id", "status"),
+        Index("ux_record_natural_key", "form_id", "natural_key", unique=True,
+              postgresql_where=text("natural_key IS NOT NULL")),
     )
 
 

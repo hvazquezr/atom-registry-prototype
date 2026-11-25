@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.errors import bad_request, not_found
 from app.models import Atom, AtomRevision, ChangeRequest, SchemaVersion
+from app.services import natural_keys
 from app.services import relations as rel_service
 from app.services.fields import get_schema, latest_schema
 from app.services.validation import recompute_time_dependent
@@ -56,9 +57,11 @@ def set_search_vector(db: Session, atom: Atom, fields: list[dict]) -> None:
 
 
 def serialize(atom: Atom, cache: SchemaCache, now: dt.datetime | None = None) -> dict:
-    values = recompute_time_dependent(cache.fields(atom.schema_version), atom.values, now=now)
+    fields = cache.fields(atom.schema_version)
+    values = recompute_time_dependent(fields, atom.values, now=now)
     return {
         "id": str(atom.id),
+        "natural_key": natural_keys.atom_key_values(fields, values),
         "schema_version": atom.schema_version,
         "status": atom.status,
         "revision": atom.revision,
@@ -72,6 +75,16 @@ def serialize(atom: Atom, cache: SchemaCache, now: dt.datetime | None = None) ->
 
 def get_atom(db: Session, atom_id: uuid.UUID) -> Atom:
     atom = db.get(Atom, atom_id)
+    if not atom:
+        raise not_found("Atom")
+    return atom
+
+
+def get_by_key(db: Session, path_value: str | None, query: dict) -> Atom:
+    """Find an atom by its natural key: `path_value` for a one-field key, else one query parameter per field."""
+    fields = latest_schema(db).fields if latest_schema(db) else []
+    key = natural_keys.lookup_key(natural_keys.atom_lookup_parts(fields), path_value, query, "The atom schema")
+    atom = db.scalars(select(Atom).where(Atom.natural_key == key)).first()
     if not atom:
         raise not_found("Atom")
     return atom

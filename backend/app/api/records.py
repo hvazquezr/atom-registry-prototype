@@ -11,9 +11,10 @@ from sqlalchemy.orm import Session
 
 from app.auth import Principal, require
 from app.db import get_db
-from app.errors import bad_request, not_found
+from app.errors import AppError, bad_request, not_found
 from app.schemas import RecordAnswers, RecordCreate, RecordPatch, RecordStatusChange
 from app.services import forms as form_service
+from app.services import natural_keys
 from app.services import records as record_service
 
 router = APIRouter(prefix="/api/v1", tags=["records"])
@@ -198,6 +199,108 @@ def create_form_record(form_key: FormKey, body: RecordAnswers, response: Respons
     out = create_record(RecordCreate(form=form_key, answers=body.answers), response, db, p)
     response.headers["Location"] = f"/api/v1/data/{out['form']['key']}/{out['id']}"
     return out
+
+
+# --- By natural key: /api/v1/data/{form key}/key ---------------------------------------
+
+KEY_RULES = (
+    "The natural key is the questions marked Natural key in the Form builder (listed under `natural_key` in "
+    "the form's published definition). For a key of one question, put the answer in the path: "
+    "`/data/{form_key}/key/{value}`. For a combined key, send each answer as a query parameter named by its "
+    "question key: `/data/{form_key}/key?first_name=Ana&last_name=Diaz`. Text and choices match without "
+    "regard to case or surrounding spaces; numbers by value; dates as YYYY-MM-DD. Archived records are found "
+    "too. 409 if the form has no natural key."
+)
+
+
+def _key_record(db: Session, form_key: str, value: str | None, request: Request):
+    form = form_service.get_form(db, form_key)
+    return form, record_service.get_by_key(db, form, value, dict(request.query_params))
+
+
+def _get_by_key(form_key: str, value: str | None, request: Request, response: Response, db: Session):
+    _, rec = _key_record(db, form_key, value, request)
+    return _body(db, rec, response)
+
+
+def _patch_by_key(form_key: str, value: str | None, body: RecordPatch, request: Request, response: Response,
+                  if_match: str | None, db: Session, p: Principal):
+    _, rec = _key_record(db, form_key, value, request)
+    return update_record(rec.id, body, response, if_match, db, p)
+
+
+def _put_by_key(form_key: str, value: str | None, body: RecordAnswers, request: Request, response: Response,
+                if_match: str | None, db: Session, p: Principal):
+    form = form_service.get_form(db, form_key)
+    query = dict(request.query_params)
+    latest = record_service.latest_definition(db, form)
+    parts = natural_keys.record_lookup_parts(latest)
+    natural_keys.lookup_key(parts, value, query, form.name)  # checks the URL names the whole key
+    from_url = record_service.key_answers(form, latest, value, query)
+    for key, label, kind in parts:
+        if key in body.answers and natural_keys.normalize(kind or "text", body.answers[key]) != natural_keys.normalize(kind or "text", from_url[key]):
+            raise bad_request("key_mismatch", f"The answer for {label} doesn't match the key in the URL. "
+                              "To change a record's key, use PATCH.")
+    try:
+        rec = record_service.get_by_key(db, form, value, query)
+    except AppError as exc:
+        if exc.status != 404:
+            raise
+        rec = None
+    if rec is None:
+        out = create_record(RecordCreate(form=form.key, answers={**body.answers, **from_url}), response, db, p)
+        response.status_code = 201
+        response.headers["Location"] = f"/api/v1/data/{form.key}/{out['id']}"
+        return out | {"created": True}
+    out = update_record(rec.id, RecordPatch(answers=body.answers), response, if_match, db, p)
+    return out | {"created": False}
+
+
+GET_BY_KEY = dict(summary="Get a record by its natural key", description="The same as GET /data/{form_key}/{record_id}. " + KEY_RULES + " Needs `records:read`.")
+PATCH_BY_KEY = dict(summary="Change a record found by its natural key",
+                    description="The same as PATCH /data/{form_key}/{record_id}. You can change the key answers too, as long as no "
+                                "other record of the form has the new key (409 otherwise). " + KEY_RULES + " Needs `records:write`.")
+PUT_BY_KEY = dict(summary="Create or update a record by its natural key",
+                  description="If a record has this key, the answers sent are changed on it (like PATCH: only what you send changes, "
+                              "null clears one) and the response is 200. Otherwise a new record is saved with these answers plus the key "
+                              "from the URL, and the response is 201 with a Location header. `created` says which happened. Key answers "
+                              "in the body must match the URL (use PATCH to change a key). " + KEY_RULES + " Needs `records:write`.")
+
+
+@data_router.get("/data/{form_key}/key", **GET_BY_KEY)
+def get_form_record_by_key_query(form_key: FormKey, request: Request, response: Response, db: Session = Depends(get_db),
+                                 _: Principal = Depends(read)):
+    return _get_by_key(form_key, None, request, response, db)
+
+
+@data_router.get("/data/{form_key}/key/{value:path}", **GET_BY_KEY)
+def get_form_record_by_key(form_key: FormKey, value: str, request: Request, response: Response, db: Session = Depends(get_db),
+                           _: Principal = Depends(read)):
+    return _get_by_key(form_key, value, request, response, db)
+
+
+@data_router.patch("/data/{form_key}/key", **PATCH_BY_KEY)
+def update_form_record_by_key_query(form_key: FormKey, body: RecordPatch, request: Request, response: Response,
+                                    if_match: str | None = Header(None), db: Session = Depends(get_db), p: Principal = Depends(write)):
+    return _patch_by_key(form_key, None, body, request, response, if_match, db, p)
+
+
+@data_router.patch("/data/{form_key}/key/{value:path}", **PATCH_BY_KEY)
+def update_form_record_by_key(form_key: FormKey, value: str, body: RecordPatch, request: Request, response: Response,
+                              if_match: str | None = Header(None), db: Session = Depends(get_db), p: Principal = Depends(write)):
+    return _patch_by_key(form_key, value, body, request, response, if_match, db, p)
+
+
+@data_router.put("/data/{form_key}/key", **PUT_BY_KEY)
+def upsert_form_record_by_key_query(form_key: FormKey, body: RecordAnswers, request: Request, response: Response,
+                                    if_match: str | None = Header(None), db: Session = Depends(get_db), p: Principal = Depends(write)):
+    return _put_by_key(form_key, None, body, request, response, if_match, db, p)
+
+
+@data_router.put("/data/{form_key}/key/{value:path}", **PUT_BY_KEY)
+def upsert_form_record_by_key(form_key: FormKey, value: str, body: RecordAnswers, request: Request, response: Response,
+                              if_match: str | None = Header(None), db: Session = Depends(get_db), p: Principal = Depends(write)):
+    return _put_by_key(form_key, value, body, request, response, if_match, db, p)
 
 
 @data_router.get(

@@ -123,6 +123,7 @@ export default function SchemaAdmin() {
                 <td>
                   <button className="link strong" onClick={() => setEditing(f)}>{f.label}</button>
                   {f.required && <span className="req"> *</span>}
+                  {f.natural_key && <span className="pill key" title="Part of the natural key">key</span>}
                   <div className="mono small muted">{f.key}</div>
                 </td>
                 <td>

@@ -21,6 +21,7 @@ class FieldCreate(BaseModel):
     calculated: bool = False
     expression: str | None = Field(None, examples=["unit_price * quantity"])
     position: int | None = None
+    natural_key: bool = Field(False, description="Part of the natural key that identifies an atom. Key fields are required.")
 
 
 class FieldUpdate(BaseModel):
@@ -33,6 +34,7 @@ class FieldUpdate(BaseModel):
     calculated: bool | None = None
     expression: str | None = None
     position: int | None = None
+    natural_key: bool | None = None
 
 
 class ExpressionCheck(BaseModel):
@@ -166,6 +168,7 @@ class FormItemIn(BaseModel):
     label: str = Field("", description="Overrides the atom's name on this form.")
     help_text: str = Field("", description="Overrides the atom's description on this form.")
     required: bool = Field(False, description="Always required on this form. Can't be combined with Required if.")
+    natural_key: bool = Field(False, description="Part of the natural key of the form's records. Key questions are always required.")
 
 
 class FormSectionIn(BaseModel):

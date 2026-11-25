@@ -79,6 +79,12 @@ export function IssueList({ issues, onAdd }: { issues: FormIssue[]; onAdd?: (i: 
 
 // --- Build --------------------------------------------------------------------------------
 
+const KEY_INPUTS = new Set(['text', 'integer', 'number', 'date', 'choice'])
+
+function keyableInput(resolved?: ResolvedItem) {
+  return !resolved || KEY_INPUTS.has(resolved.input.type)
+}
+
 function ItemRow({
   item, resolved, name, editable, onChange, onRemove, onMove, dragProps,
 }: {
@@ -105,6 +111,7 @@ function ItemRow({
               {item.label && <span className="muted small"> ({name})</span>}
               {resolved && <span className="pill gray">{ANSWER_LABELS[resolved.input.answer_type] ?? resolved.input.answer_type}</span>}
               {calc && <span className="pill blue" title={calc.formula}>calculated</span>}
+              {item.natural_key && <span className="pill key" title="Part of the natural key of this form's records">key</span>}
               {resolved?.atom_status === 'deprecated' && <span className="pill rejected">deprecated atom</span>}
             </div>
             <div className="muted small">
@@ -121,6 +128,8 @@ function ItemRow({
             <span className="requirement locked" title="Calculated answers are never asked, so they're neither required nor optional.">Calculated</span>
           ) : conditional ? (
             <span className="requirement locked" title="Set by the atom's Required if link.">Required if</span>
+          ) : item.natural_key ? (
+            <span className="requirement req" title="Natural key questions are always required.">Required</span>
           ) : editable ? (
             <div className="segmented" role="group" aria-label="Required or optional">
               <button className={item.required ? 'on' : ''} aria-pressed={item.required} onClick={() => !item.required && onChange({ required: true }, true)}>Required</button>
@@ -128,6 +137,11 @@ function ItemRow({
             </div>
           ) : (
             <span className={`requirement ${item.required ? 'req' : ''}`}>{item.required ? 'Required' : 'Optional'}</span>
+          )}
+          {editable && (item.natural_key || (!calc && !conditional && keyableInput(resolved))) && (
+            <label className="check small" title="Identifies a record: no two records of this form can share it, and the API can get a record by it.">
+              <input type="checkbox" checked={!!item.natural_key} onChange={(e) => onChange({ natural_key: e.target.checked }, true)} /> Key
+            </label>
           )}
           <Link to={`/atoms/${item.atom_id}`} className="small">Atom</Link>
           {editable && (

@@ -42,6 +42,7 @@ export interface Field {
   status?: 'active' | 'deprecated'
   system?: boolean
   published?: boolean
+  natural_key?: boolean
 }
 
 export type Values = Record<string, unknown>
@@ -250,6 +251,7 @@ export interface ResolvedItem {
   label: string
   help_text: string
   required: boolean
+  natural_key?: boolean
   requirement: 'required' | 'optional' | 'required_if' | 'calculated'
   input: FormInput
   atom_values: Values
@@ -265,6 +267,7 @@ export interface FormDefinition {
   published_at?: string
   notes?: string
   sections: { title: string; description: string; items: ResolvedItem[] }[]
+  natural_key?: string[]
 }
 
 export interface DraftItem {
@@ -274,6 +277,7 @@ export interface DraftItem {
   label: string
   help_text: string
   required: boolean
+  natural_key?: boolean
 }
 
 export interface DraftSection {

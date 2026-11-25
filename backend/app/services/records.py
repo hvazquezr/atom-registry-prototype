@@ -28,6 +28,7 @@ from app.errors import ValidationFailed, bad_request, conflict, not_found
 from app.models import Form, FormVersion, Record, RecordRevision, User
 from app.services import change_requests as cr_service
 from app.services import forms as form_service
+from app.services import natural_keys
 from app.services.validation import is_empty
 
 FILTER_OPS = ("eq", "ne", "in", "gt", "gte", "lt", "lte", "contains", "exists")
@@ -124,6 +125,28 @@ def get_record(db: Session, record_id: uuid.UUID) -> Record:
     return rec
 
 
+def latest_definition(db: Session, form: Form) -> dict:
+    return _latest(db, form).definition
+
+
+def get_by_key(db: Session, form: Form, path_value: str | None, query: dict) -> Record:
+    """Find a form's record by its natural key: `path_value` for a one-question key, else one query parameter per question."""
+    latest = _latest(db, form).definition
+    key = natural_keys.lookup_key(natural_keys.record_lookup_parts(latest), path_value, query, form.name)
+    rec = db.scalars(select(Record).where(Record.form_id == form.id, Record.natural_key == key)).first()
+    if not rec:
+        raise not_found("Record")
+    return rec
+
+
+def key_answers(form: Form, definition: dict, path_value: str | None, query: dict) -> dict:
+    """The key answers named in a URL, as given (for creating a record by its key)."""
+    parts = natural_keys.record_lookup_parts(definition)
+    if path_value is not None:
+        return {parts[0][0]: path_value} if len(parts) == 1 else {}
+    return {k: query[k] for k, _, _ in parts if k in query}
+
+
 def current_answers(rec: Record, definition: dict, now=None) -> tuple[dict, list[str]]:
     """Stored answers, with today()/now() formulas worked out again."""
     if not time_dependent(definition):
@@ -142,9 +165,11 @@ def serialize(rec: Record, defs: Definitions, names: dict | None = None, now=Non
     form = defs.form(rec.form_id)
     definition = defs.get(rec.form_id, rec.form_version)
     answers, missing = current_answers(rec, definition, now)
+    latest = defs.get(rec.form_id, form.latest_version) if form.latest_version else definition
     names = names or {}
     out = {
         "id": str(rec.id),
+        "natural_key": natural_keys.record_key_values(latest, answers) if rec.natural_key else None,
         "form": {"id": str(form.id), "key": form.key, "name": form.name, "status": form.status},
         "form_version": rec.form_version,
         "latest_form_version": form.latest_version,
@@ -325,7 +350,8 @@ def create_record(db: Session, user: User, form: Form, answers: dict, now=None) 
     if not isinstance(answers, dict):
         raise bad_request("bad_answers", "answers must be an object keyed by question key.")
     clean, missing = check(fv.definition, answers, now)
-    rec = Record(form_id=form.id, form_version=fv.version, revision=1, status="active",
+    key = natural_keys.check_record_key(db, form.id, fv.definition, fv.definition, clean)
+    rec = Record(form_id=form.id, form_version=fv.version, revision=1, status="active", natural_key=key,
                  created_by=user.id, updated_by=user.id)
     _apply(rec, fv.definition, clean, missing)
     db.add(rec)
@@ -373,8 +399,10 @@ def update_record(db: Session, user: User, rec: Record, answers: dict | None = N
         for k in dropped:
             merged.pop(k)
     clean, missing = check(definition, merged, now)
+    latest = definition if to_latest else _latest(db, form).definition
+    key = natural_keys.check_record_key(db, form.id, latest, definition, clean, rec.id)
 
-    if version == rec.form_version and clean == rec.answers and missing == rec.missing:
+    if version == rec.form_version and clean == rec.answers and missing == rec.missing and key == rec.natural_key:
         return rec, dropped
     parts = []
     if version != rec.form_version:
@@ -383,6 +411,7 @@ def update_record(db: Session, user: User, rec: Record, answers: dict | None = N
     if changed:
         parts.append("Changed " + ", ".join(changed[:5]) + (f" and {len(changed) - 5} more" if len(changed) > 5 else ""))
     rec.form_version = version
+    rec.natural_key = key
     _apply(rec, definition, clean, missing)
     rec.revision += 1
     rec.updated_by = user.id

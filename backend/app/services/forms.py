@@ -28,7 +28,7 @@ from sqlalchemy.orm import Session
 
 from app.errors import AppError, ValidationFailed, bad_request, conflict, field_error, not_found
 from app.models import AppSetting, Atom, AtomRelation, ChangeRequest, Form, FormItem, FormSection, FormVersion, User
-from app.services import expressions, formulas
+from app.services import expressions, formulas, natural_keys
 from app.services.fields import KEY_PATTERN, check_config
 from app.services.validation import is_empty, validate_value
 
@@ -228,7 +228,7 @@ def draft_body(form: Form) -> dict:
                 "id": str(s.id), "title": s.title, "description": s.description,
                 "items": [
                     {"id": str(i.id), "atom_id": str(i.atom_id), "key": i.key, "label": i.label,
-                     "help_text": i.help_text, "required": i.required}
+                     "help_text": i.help_text, "required": i.required, "natural_key": i.natural_key}
                     for i in s.items
                 ],
             }
@@ -316,7 +316,7 @@ def _replace_sections(db: Session, form: Form, sections: list) -> None:
             if len(label) > 200:
                 errors.append(field_error(f"{where}.label", "too_long", "Labels are at most 200 characters."))
             items.append({"atom": atom, "key": key, "label": label, "help_text": (it.get("help_text") or "").strip(),
-                          "required": bool(it.get("required"))})
+                          "required": bool(it.get("required")), "natural_key": bool(it.get("natural_key"))})
         parsed.append({"title": title, "description": (s.get("description") or "").strip(), "items": items})
     if errors:
         raise ValidationFailed(errors)
@@ -342,7 +342,7 @@ def _replace_sections(db: Session, form: Form, sections: list) -> None:
         for it in s["items"]:
             section.items.append(FormItem(form_id=form.id, section_id=section.id, atom_id=it["atom"].id, key=it["key"],
                                           position=position, label=it["label"], help_text=it["help_text"],
-                                          required=it["required"]))
+                                          required=it["required"], natural_key=it["natural_key"]))
             position += 1
     db.flush()
 
@@ -494,7 +494,9 @@ def resolve(db: Session, form: Form) -> tuple[dict, list[dict]]:
                 "label": i.label or values.get("name") or i.key,
                 "help_text": i.help_text or values.get("description") or "",
                 "overrides": {"label": i.label, "help_text": i.help_text, "required": i.required},
-                "required": i.required,
+                # Key questions are always required.
+                "required": i.required or i.natural_key,
+                "natural_key": i.natural_key,
                 "input": input_spec(values, settings),
                 "atom_values": values,
                 "conditions": r["conditions"],
@@ -503,6 +505,8 @@ def resolve(db: Session, form: Form) -> tuple[dict, list[dict]]:
             }
             if calculation:
                 out_item["calculation"] = calculation
+            if i.natural_key and (msg := natural_keys.item_problem(out_item)):
+                issues.append(_issue("error", "natural_key_not_allowed", f"{out_item['label']} {msg}", i.key))
             out_item["requirement"] = requirement(out_item)
             out_items.append(out_item)
         sections_out.append({"title": s.title, "description": s.description, "items": out_items})
@@ -515,6 +519,7 @@ def resolve(db: Session, form: Form) -> tuple[dict, list[dict]]:
     definition = {
         "form": {"id": str(form.id), "key": form.key, "name": form.name, "description": form.description},
         "sections": sections_out,
+        "natural_key": [i["key"] for s in sections_out for i in s["items"] if i["natural_key"]],
     }
     return definition, issues
 
@@ -598,6 +603,8 @@ def diff(old: dict | None, new: dict) -> dict:
         for f in ("label", "help_text", "required", "input", "conditions", "calculation"):
             if a[k].get(f) != b[k].get(f):
                 what.append(f.replace("_", " "))
+        if bool(a[k].get("natural_key")) != bool(b[k].get("natural_key")):
+            what.append("natural key")
         if what:
             changed.append({"key": k, "label": b[k]["label"], "changes": what})
     return {
@@ -775,6 +782,7 @@ def submit_request(db: Session, user: User, form: Form, kind: str, notes: str = 
         latest = get_version(db, form, form.latest_version) if form.latest_version else None
         if latest and _comparable(latest.definition) == _comparable(definition):
             raise conflict("no_changes", "Nothing has changed since the last published version.")
+        natural_keys.reassign_record_keys(db, form.id, definition, apply=False)
     elif kind == "deprecate_form" and form.status == "deprecated":
         raise conflict("already_deprecated", "The form is already deprecated.")
     elif kind == "restore_form" and form.status == "active":
@@ -816,6 +824,8 @@ def apply_request(db: Session, reviewer: User, cr: ChangeRequest) -> Form:
         definition, issues = resolve(db, form)
         if has_errors(issues):
             raise ValidationFailed([field_error(i["item"] or "form", i["code"], i["message"]) for i in issues if i["severity"] == "error"])
+        # Key the form's records by the new version's key questions; refused if they would clash.
+        natural_keys.reassign_record_keys(db, form.id, definition)
         version = (form.latest_version or 0) + 1
         definition["version"] = version
         definition["published_at"] = dt.datetime.now(dt.UTC).isoformat()

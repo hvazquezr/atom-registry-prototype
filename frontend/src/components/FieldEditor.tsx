@@ -202,14 +202,20 @@ function ExpressionEditor({ field, fields, onChange }: { field: Field; fields: F
   )
 }
 
+function keyable(f: Field) {
+  if (f.calculated) return false
+  if (f.type === 'options') return !f.config.multiple
+  return f.type === 'text' || f.type === 'number' || f.type === 'date'
+}
+
 export default function FieldEditor({ field, fields, onClose, readOnly }: { field: Field | null; fields: Field[]; onClose: () => void; readOnly: boolean }) {
   const [f, setF] = useState<Field>(field ?? { ...blank, position: fields.length })
   const isNew = !field?.id
   const save = useMutation({
     mutationFn: () => {
       const body = {
-        key: f.key, label: f.label, description: f.description, type: f.type, required: f.required,
-        config: clean(f.config), calculated: f.calculated, expression: f.calculated ? f.expression : null,
+        key: f.key, label: f.label, description: f.description, type: f.type, required: f.required || !!f.natural_key,
+        natural_key: !!f.natural_key, config: clean(f.config), calculated: f.calculated, expression: f.calculated ? f.expression : null,
       }
       return isNew ? api<Field>('/internal/fields', { body }) : api<Field>(`/internal/fields/${field!.id}`, { method: 'PATCH', body })
     },
@@ -253,10 +259,24 @@ export default function FieldEditor({ field, fields, onClose, readOnly }: { fiel
             <div className="form-field">
               <label>&nbsp;</label>
               <div className="row">
-                <label className="check"><input type="checkbox" checked={f.required} onChange={(e) => setF({ ...f, required: e.target.checked })} /> Mandatory</label>
-                <label className="check"><input type="checkbox" checked={f.calculated} disabled={field?.system} onChange={(e) => setF({ ...f, calculated: e.target.checked })} /> Calculated</label>
+                <label className="check" title={f.natural_key ? 'Natural key fields are always mandatory.' : undefined}>
+                  <input type="checkbox" checked={f.required || !!f.natural_key} disabled={!!f.natural_key} onChange={(e) => setF({ ...f, required: e.target.checked })} /> Mandatory
+                </label>
+                <label className="check"><input type="checkbox" checked={f.calculated} disabled={field?.system || !!f.natural_key} onChange={(e) => setF({ ...f, calculated: e.target.checked })} /> Calculated</label>
               </div>
             </div>
+          </div>
+          <div className={`form-field ${errors.natural_key ? 'has-error' : ''}`}>
+            <label className="check">
+              <input type="checkbox" checked={!!f.natural_key} disabled={!keyable(f) && !f.natural_key}
+                onChange={(e) => setF({ ...f, natural_key: e.target.checked, required: e.target.checked ? true : f.required })} /> Natural key
+            </label>
+            <div className="hint">
+              {keyable(f) || f.natural_key
+                ? 'Identifies an atom: no two atoms can share it, and the API can get an atom by it (GET /api/v1/atoms/key/{value}). Tick more than one field for a combined key.'
+                : 'Only text, number, date and single-choice fields that aren\'t calculated can be part of the natural key.'}
+            </div>
+            {errors.natural_key && <div className="field-error">{errors.natural_key}</div>}
           </div>
           {f.calculated && <ExpressionEditor field={f} fields={fields} onChange={(expression) => setF({ ...f, expression })} />}
           <h4>Validation</h4>

@@ -248,6 +248,33 @@ Answers are keyed by the form's question keys (see `GET /api/v1/forms/{form_key}
 | 409 `record_archived` | Changing an archived record |
 | 409 `form_deprecated`, `form_not_published` | Creating a record for a deprecated form, or one with no published version |
 | 404 | Unknown form, unknown record, or a record that belongs to another form |
+| 409 `duplicate_key` | Another record of the form already has this natural key (`details.record_id` names it) |
+
+## Natural keys
+
+A natural key identifies an atom or a record by its own values instead of its UUID.
+
+- **Atoms:** tick *Natural key* on one or more fields on the Fields page, then publish the schema. Key
+  fields are mandatory, and no two atoms (deprecated ones included) can share a key. Publishing is
+  refused, with the atoms listed, if existing atoms would clash or are missing a key value.
+  `GET /api/v1/schema` lists the key under `natural_key`.
+- **Records:** tick *Key* on one or more questions in the Form builder, then publish the form. Key
+  questions are always required, and a record can't be saved without its key answers. No two records
+  of a form (archived ones included) can share a key. Publishing is refused if existing records would
+  clash. Calculated, Required if, yes/no and multiple-choice questions can't be keys.
+- **Matching:** text and choices ignore case and surrounding spaces; numbers match by value; dates as
+  YYYY-MM-DD.
+
+| Route | What it does | Scope |
+| --- | --- | --- |
+| `GET /api/v1/atoms/key/{value}` | The atom with this one-field key | `atoms:read` |
+| `GET /api/v1/atoms/key?code=X&year=2024` | The atom with this combined key (one parameter per key field) | `atoms:read` |
+| `GET /api/v1/data/{form_key}/key/{value}` (or `/key?q1=…&q2=…`) | The record with this key | `records:read` |
+| `PATCH /api/v1/data/{form_key}/key/{value}` | Change that record (its key answers too) | `records:write` |
+| `PUT /api/v1/data/{form_key}/key/{value}` | Upsert: update the record with this key, or create it (201, `created: true`) | `records:write` |
+
+A one-part key goes in the path; a combined key goes in the query string, so the path form answers
+400 `combined_key` for it. Atoms and records include `natural_key` (the key's values) in their JSON.
 
 ## Settings
 

@@ -34,6 +34,7 @@ def _schema_body(db: Session, version: int | None = None) -> dict:
         "published_at": s.published_at.isoformat(),
         "notes": s.notes,
         "fields": s.fields,
+        "natural_key": [f["key"] for f in s.fields if f.get("natural_key")],
         "relation_types": [rel_service.relation_type_to_dict(r) for r in rel_service.list_relation_types(db, include_deprecated=False)],
     }
 
@@ -91,6 +92,39 @@ def search_atoms(
         except ValueError as exc:
             raise bad_request("bad_ids", "ids must be comma-separated UUIDs.") from exc
     return atom_service.search(db, q=q, status=status, filters=filters, sort=sort, page=page, page_size=page_size, ids=id_list)
+
+
+KEY_LOOKUP = (
+    "Finds the atom whose natural key (the fields marked Natural key on the Fields page, see "
+    "`natural_key` in GET /schema) has these values. Text and choices match without regard to case or "
+    "surrounding spaces; numbers by value; dates as YYYY-MM-DD. Deprecated atoms are found too (see `status`). "
+    "404 if no atom has the key; 409 if the schema has no natural key."
+)
+
+
+@router.get(
+    "/atoms/key",
+    summary="Get an atom by its natural key (any key, including combined keys)",
+    description="Send one query parameter per key field, e.g. `/atoms/key?code=ABC&region=EU`. " + KEY_LOOKUP,
+)
+def get_atom_by_key_query(request: Request, response: Response, db: Session = Depends(get_db), _: Principal = Depends(read)):
+    return _atom_body(db, atom_service.get_by_key(db, None, dict(request.query_params)), response)
+
+
+@router.get(
+    "/atoms/key/{value:path}",
+    summary="Get an atom by its natural key (one-field keys)",
+    description="For a key made of one field, e.g. `/atoms/key/ABC`. For a combined key, use `/atoms/key?field=…`. " + KEY_LOOKUP,
+)
+def get_atom_by_key(value: str, response: Response, db: Session = Depends(get_db), _: Principal = Depends(read)):
+    return _atom_body(db, atom_service.get_by_key(db, value, {}), response)
+
+
+def _atom_body(db: Session, atom, response: Response) -> dict:
+    body = atom_service.serialize(atom, atom_service.SchemaCache(db))
+    body["pending_change_requests"] = atom_service.pending_requests(db, atom.id)
+    response.headers["ETag"] = f'"{atom.revision}"'
+    return body
 
 
 @router.get("/atoms/{atom_id}")

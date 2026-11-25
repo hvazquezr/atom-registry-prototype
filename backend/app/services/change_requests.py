@@ -12,7 +12,7 @@ from app.config import get_settings
 from app.errors import AppError, ValidationFailed, bad_request, conflict, field_error, not_found
 from app.models import Atom, AtomRelation, ChangeRequest, User
 from app.services import atoms as atom_service
-from app.services import formulas
+from app.services import formulas, natural_keys
 from app.services import relations as rel_service
 from app.services.fields import require_schema
 from app.services.validation import validate_atom_values
@@ -119,11 +119,15 @@ def _check_relations(db: Session, atom_id: uuid.UUID | None, rels: dict) -> list
 def _validate(db: Session, kind: str, atom: Atom | None, values: dict, rels: dict) -> dict:
     schema = require_schema(db)
     if kind == "create":
-        formulas.check(db, None, validate_atom_values(schema.fields, values))
+        clean = validate_atom_values(schema.fields, values)
+        natural_keys.check_atom_key(db, schema.fields, clean)
+        formulas.check(db, None, clean)
     elif kind == "update":
         if not values and not rels["add"] and not rels["remove"]:
             raise bad_request("empty_change", "The change request doesn't change anything.")
-        formulas.check(db, atom.id, validate_atom_values(schema.fields, values, existing=atom.values))
+        clean = validate_atom_values(schema.fields, values, existing=atom.values)
+        natural_keys.check_atom_key(db, schema.fields, clean, atom.id)
+        formulas.check(db, atom.id, clean)
     elif values or rels["add"] or rels["remove"]:
         raise bad_request("bad_change", f"A {kind} request can't change values or relations.")
     rels["add"] = _check_relations(db, atom.id if atom else None, rels)
@@ -251,13 +255,15 @@ def approve(db: Session, user: User, cr: ChangeRequest, comment: str = "") -> tu
     summary = cr.kind
     if cr.kind == "create":
         values = validate_atom_values(schema.fields, cr.proposed_values)
-        atom = Atom(schema_version=schema.version, values=values, status="active", revision=1,
+        key = natural_keys.check_atom_key(db, schema.fields, values)
+        atom = Atom(schema_version=schema.version, values=values, status="active", revision=1, natural_key=key,
                     created_by=cr.submitted_by, updated_by=cr.submitted_by)
         db.add(atom)
         db.flush()
         summary = "Created"
     elif cr.kind == "update":
         atom.values = validate_atom_values(schema.fields, cr.proposed_values, existing=atom.values)
+        atom.natural_key = natural_keys.check_atom_key(db, schema.fields, atom.values, atom.id)
         atom.schema_version = schema.version
         atom.revision += 1
         summary = "Updated " + ", ".join(sorted(cr.proposed_values)) if cr.proposed_values else "Updated relations"
