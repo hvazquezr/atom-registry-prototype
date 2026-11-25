@@ -73,9 +73,9 @@ DEMO_FIELDS = [
     {"key": "introduced_on", "label": "Introduced on", "type": "date", "config": {"min": "2000-01-01"}},
     {"key": "synonyms", "label": "Synonyms", "type": "list", "config": {"item_type": "text", "max_items": 10}},
     {"key": "age_days", "label": "Age (days)", "type": "number", "calculated": True,
-     "expression": "days_between(introduced_on, today())"},
+     "expression": "days_between(@introduced_on, today())"},
     {"key": "display_label", "label": "Display label", "type": "text", "calculated": True,
-     "expression": 'code + " " + name'},
+     "expression": '@code + " " + @name'},
 ]
 
 DEMO_ATOMS = [

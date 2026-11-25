@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { api, type Choice, type Field, type FieldConfig, type FieldType } from '../api'
 import ErrorBox, { fieldErrorMap } from './ErrorBox'
 import FieldInput from './FieldInput'
+import RefTextarea from './RefTextarea'
 import ValueView from './ValueView'
 
 const TYPES: { value: FieldType; label: string }[] = [
@@ -167,23 +168,24 @@ function ExpressionEditor({ field, fields, onChange }: { field: Field; fields: F
       }),
     enabled: debounced.trim().length > 0,
   })
+  const others = fields.filter((f) => f.key !== field.key && f.status !== 'deprecated').map((f) => ({ name: f.key, label: f.label }))
   const inputs = (check.data?.depends_on ?? []).map((k) => fields.find((f) => f.key === k)).filter(Boolean) as Field[]
   const missing = inputs.some((f) => testValues[f.key] === undefined || testValues[f.key] === null || testValues[f.key] === '')
   return (
     <div className="expr-editor">
       <div className="form-field">
         <label>Expression (CEL)</label>
-        <textarea className="mono" rows={3} value={field.expression ?? ''} onChange={(e) => onChange(e.target.value)} placeholder='unit_price * quantity' />
+        <RefTextarea value={field.expression ?? ''} onChange={onChange} options={others}
+          placeholder="Type @ to pick a field, e.g. @unit_price * @quantity" />
         <div className="hint">
-          Use other field keys as variables. Functions: today(), now(), date("2026-01-31"), days_between(a, b), size(), contains(),
-          startsWith(), conditions with <code>cond ? a : b</code>.{' '}
-          Available fields: {fields.filter((f) => f.key !== field.key && f.status !== 'deprecated').map((f) => f.key).join(', ')}
+          Refer to other fields with @ and their key, like <code>@unit_price</code> (the same as atom formulas). Functions: today(), now(),
+          date("2026-01-31"), days_between(a, b), size(), contains(), startsWith(), conditions with <code>cond ? a : b</code>.
         </div>
       </div>
       {check.data && !check.data.ok && <div className="field-error">{check.data.error?.message}</div>}
       {check.data?.ok && (
         <div className="ok small">
-          Valid. Uses {check.data.depends_on?.length ? check.data.depends_on.join(', ') : 'no other fields'}
+          Valid. Uses {check.data.depends_on?.length ? check.data.depends_on.map((k) => `@${k}`).join(', ') : 'no other fields'}
           {check.data.time_dependent && ' and the current date, so it is recalculated whenever the atom is read'}.
         </div>
       )}

@@ -14,7 +14,7 @@ interface Props {
 }
 
 /** The @name being typed just before the caret, if any. */
-function tokenAt(text: string, caret: number): { start: number; query: string } | null {
+export function tokenAt(text: string, caret: number): { start: number; query: string } | null {
   const m = /@([a-z0-9_]*)$/i.exec(text.slice(0, caret))
   if (!m) return null
   const before = text.slice(0, m.index)

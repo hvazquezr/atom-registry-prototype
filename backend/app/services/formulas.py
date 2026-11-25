@@ -30,7 +30,6 @@ from app.services import expressions
 
 LINK_TYPE = "calculated_from"
 DEFAULT_FORMULA_FIELD = "formula"
-_IDENT = re.compile(r"[a-z][a-z0-9_]*")
 _SLUG = re.compile(r"[^a-z0-9]+")
 
 
@@ -62,40 +61,10 @@ def translate(source: str) -> tuple[str, list[str]]:
 
     Text inside string literals is left alone, so "a@b.com" stays as it is.
     """
-    out: list[str] = []
-    refs: list[str] = []
-    i, n = 0, len(source)
-    quote: str | None = None
-    while i < n:
-        c = source[i]
-        if quote:
-            out.append(c)
-            if c == "\\" and i + 1 < n:
-                out.append(source[i + 1])
-                i += 2
-                continue
-            if c == quote:
-                quote = None
-            i += 1
-            continue
-        if c in ("'", '"'):
-            quote = c
-            out.append(c)
-            i += 1
-            continue
-        if c == "@":
-            m = _IDENT.match(source, i + 1)
-            if not m:
-                raise FormulaError("After @ comes an atom's name in lowercase with underscores, like @date_of_birth.")
-            name = m.group(0)
-            if name not in refs:
-                refs.append(name)
-            out.append(name)
-            i = m.end()
-            continue
-        out.append(c)
-        i += 1
-    return "".join(out), refs
+    try:
+        return expressions.translate_refs(source, "an atom's name in lowercase with underscores, like @date_of_birth")
+    except expressions.ExpressionError as exc:
+        raise FormulaError(exc.message) from exc
 
 
 def parse(source: str) -> tuple[expressions.ParsedExpression, list[str]]:

@@ -254,6 +254,10 @@ def save_field(db: Session, data: dict, field_id: uuid.UUID | None = None) -> Fi
         }
     if not merged.get("calculated"):
         merged["expression"] = None
+    elif merged.get("expression"):
+        # Store references to other fields in the @ form, like atom formulas.
+        keys = {r.key for r in existing_rows if r.id != field_id}
+        merged["expression"] = expressions.with_at_refs(merged["expression"].strip(), keys)
     if merged.get("natural_key"):
         merged["required"] = True  # a key part can't be left empty
 
@@ -367,7 +371,12 @@ def draft_changes(db: Session) -> dict:
     current = {f["key"]: f for f in snapshot(list_fields(db))}
     latest = latest_schema(db)
     # Schemas published before natural keys existed have no natural_key setting: read it as off.
+    # Expressions published before the @ form are compared in the @ form.
     published = {f["key"]: {"natural_key": False} | f for f in (latest.fields if latest else [])}
+    keys = set(published)
+    for k, f in published.items():
+        if f.get("expression"):
+            published[k] = f | {"expression": expressions.with_at_refs(f["expression"], keys - {k})}
     added = sorted(set(current) - set(published))
     removed = sorted(set(published) - set(current))
     changed = sorted(k for k in set(current) & set(published) if current[k] != published[k])

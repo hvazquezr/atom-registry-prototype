@@ -4,6 +4,10 @@ CEL (Common Expression Language) has no I/O, imports, assignments or unbounded l
 user-written expression cannot reach the system it runs on. On top of that we cap expression
 length and syntax-tree size, and only allow a fixed list of functions.
 
+Other values are referred to with @: `@date_of_birth` is the value of the field (or, in atom
+formulas, the atom) called date_of_birth. A bare name without @ still works, so older expressions
+keep running, but saving a field definition rewrites it to the @ form.
+
 Extra functions available in expressions:
   today()                 the current date (midnight, in the configured time zone)
   now()                   the current timestamp (UTC)
@@ -14,6 +18,7 @@ Extra functions available in expressions:
 from __future__ import annotations
 
 import datetime as dt
+import re
 from dataclasses import dataclass, field
 from zoneinfo import ZoneInfo
 
@@ -57,12 +62,100 @@ class ParsedExpression:
         return bool(self.functions & TIME_FUNCTIONS)
 
 
+# --- @references ------------------------------------------------------------------------
+
+_REF = re.compile(r"[a-z][a-z0-9_]*")
+_WORD = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def _scan(source: str):
+    """Yield (kind, start, end) for the parts of an expression outside string literals.
+
+    kind is "at" (an @ sign), "word" (an identifier), "number" or "other". String literals are
+    one "string" part, so "a@b.com" is left alone.
+    """
+    i, n = 0, len(source)
+    while i < n:
+        c = source[i]
+        if c in ("'", '"'):
+            j = i + 1
+            while j < n and source[j] != c:
+                j += 2 if source[j] == "\\" else 1
+            yield "string", i, min(j + 1, n)
+            i = j + 1
+        elif c == "@":
+            yield "at", i, i + 1
+            i += 1
+        elif c.isdigit():
+            j = i
+            while j < n and (source[j].isalnum() or source[j] in "._"):
+                j += 1
+            yield "number", i, j
+            i = j
+        elif c.isalpha() or c == "_":
+            m = _WORD.match(source, i)
+            yield "word", i, m.end()
+            i = m.end()
+        else:
+            yield "other", i, i + 1
+            i += 1
+
+
+def translate_refs(source: str, hint: str = "a field key, like @date_of_birth") -> tuple[str, list[str]]:
+    """Turn @name references into plain CEL identifiers. Returns (cel_source, refs in order)."""
+    out: list[str] = []
+    refs: list[str] = []
+    pending_at = False
+    for kind, start, end in _scan(source):
+        text = source[start:end]
+        if pending_at:
+            if kind != "word" or not _REF.fullmatch(text):
+                raise ExpressionError("bad_reference", f"After @ comes {hint}.")
+            if text not in refs:
+                refs.append(text)
+            pending_at = False
+        elif kind == "at":
+            pending_at = True
+            continue
+        out.append(text)
+    if pending_at:
+        raise ExpressionError("bad_reference", f"After @ comes {hint}.")
+    return "".join(out), refs
+
+
+def with_at_refs(expression: str, keys: set[str]) -> str:
+    """Rewrite bare references to these keys in the @ form ("qty * 2" -> "@qty * 2").
+
+    Function names, member access (x.getFullYear()), names bound by macros and text in strings are
+    left alone. An expression that doesn't parse is returned unchanged.
+    """
+    try:
+        variables = parse(expression).variables & keys
+    except ExpressionError:
+        return expression
+    if not variables:
+        return expression
+    parts = list(_scan(expression))
+    out: list[str] = []
+    for n, (kind, start, end) in enumerate(parts):
+        text = expression[start:end]
+        if kind == "word" and text in variables:
+            prev = next((expression[s:e] for k, s, e in reversed(parts[:n]) if not expression[s:e].isspace()), "")
+            following = next((expression[s:e] for k, s, e in parts[n + 1:] if not expression[s:e].isspace()), "")
+            if prev not in (".", "@") and following != "(":
+                text = "@" + text
+        out.append(text)
+    return "".join(out)
+
+
 # --- Parsing ----------------------------------------------------------------------------
 
 
 def parse(expression: str) -> ParsedExpression:
     settings = get_settings()
     source = (expression or "").strip()
+    if source and "@" in source:
+        source, _ = translate_refs(source)
     if not source:
         raise ExpressionError("empty", "The expression is empty.")
     if len(source) > settings.max_expression_length:

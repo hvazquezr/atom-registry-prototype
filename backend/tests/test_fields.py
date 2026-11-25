@@ -77,3 +77,37 @@ def test_publishing_a_new_expression_recalculates_atoms(admin, make_atom):
     assert publish(admin)["recalculating"] == ["total"]
     after = admin.get(f"/api/v1/atoms/{atom['id']}").json()
     assert after["values"]["total"] == 30 and after["revision"] == 2 and after["schema_version"] == 3
+
+
+def test_expressions_refer_to_fields_with_at(admin, make_atom):
+    add_field(admin, key="qty", label="Qty", type="number")
+    # The @ form, like atom formulas; "@" inside a string is just text.
+    total = add_field(admin, key="total", label="Total", type="number", calculated=True, expression="@qty * 2")
+    assert total["depends_on"] == ["qty"]
+    label = add_field(admin, key="label2", label="Label", type="text", calculated=True, expression='@name + "@x"')
+    assert label["depends_on"] == ["name"]
+    ok = admin.post("/internal/fields/check-expression",
+                    json={"expression": "@qty + 1", "type": "number", "values": {"qty": 4}}).json()
+    assert ok["ok"] and ok["result"] == 5
+    bad = admin.post("/internal/fields/check-expression", json={"expression": "@ + 1", "type": "number"}).json()
+    assert not bad["ok"] and "After @" in bad["error"]["message"]
+
+    # Bare names still work and are saved in the @ form.
+    r = admin.patch(f"/internal/fields/{total['id']}", json={"expression": "qty * 3 + size(name)"})
+    assert r.status_code == 200 and r.json()["expression"] == "@qty * 3 + size(@name)"
+    publish(admin)
+    atom = make_atom({"name": "Box", "qty": 2})
+    assert atom["values"]["total"] == 9 and atom["values"]["label2"] == "Box@x"
+
+
+def test_old_bare_expressions_still_count_as_published(admin, db):
+    from app.models import SchemaVersion
+
+    add_field(admin, key="qty", label="Qty", type="number")
+    add_field(admin, key="total", label="Total", type="number", calculated=True, expression="qty * 2")
+    publish(admin)
+    # A schema published before the @ form has the bare expression.
+    sv = db.query(SchemaVersion).order_by(SchemaVersion.version.desc()).first()
+    sv.fields = [f | {"expression": "qty * 2"} if f["key"] == "total" else f for f in sv.fields]
+    db.commit()
+    assert admin.get("/internal/schema/draft").json()["changes"]["has_changes"] is False
