@@ -15,6 +15,12 @@ token-protected API to search, read, create and update them.
   *Includes* groups atoms under their parent, and *Required if* hides an atom until another answer
   meets the link's condition (e.g. `value == true`). Published versions are frozen, pinning each atom's
   revision.
+- **Calculated atoms.** An atom with a **Formula** gets its answer on a form from other atoms' answers.
+  Refer to other atoms with `@` and their name in lowercase with underscores, e.g. `@weight / (@height * @height)`;
+  typing `@` in the formula box suggests atoms. When the atom is approved, each `@name` becomes a
+  *Calculated from* link (kept in step with the formula, never edited by hand), so renaming an input
+  atom later doesn't break the formula. On a form the atom is read-only and fills in once every input is
+  answered; publishing is blocked until every input atom is on the form, and loops are refused.
 - **Reviews.** Every create, edit, relation change or deprecation of an atom, and every publish or
   deprecation of a form, is a change request. Anyone with the reviewer role can approve it, except the
   person who submitted it.

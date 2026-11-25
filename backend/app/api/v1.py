@@ -15,6 +15,7 @@ from app.errors import ValidationFailed, bad_request
 from app.schemas import AtomCreate, AtomPatch, AtomPreview, ChangeRequestCreate, ChangeRequestRevise, StatusChange
 from app.services import atoms as atom_service
 from app.services import change_requests as cr_service
+from app.services import formulas
 from app.services import relations as rel_service
 from app.services.fields import get_schema, require_schema
 from app.services.validation import validate_atom_values
@@ -167,11 +168,22 @@ def _created(db: Session, cr, response: Response) -> dict:
 def preview_atom(body: AtomPreview, db: Session = Depends(get_db), _: Principal = Depends(read)):
     schema = require_schema(db)
     existing = atom_service.get_atom(db, body.atom_id).values if body.atom_id else None
+    values, errors = None, []
     try:
         values = validate_atom_values(schema.fields, body.values, existing=existing)
-        return {"valid": True, "values": values, "errors": []}
     except ValidationFailed as exc:
-        return {"valid": False, "values": None, "errors": exc.errors}
+        errors = exc.errors
+    # The formula is checked on its own, so its problems show up while other fields are still empty.
+    merged = dict(existing or {}) | dict(body.values)
+    try:
+        formulas.check(db, body.atom_id, merged)
+    except ValidationFailed as exc:
+        errors = errors + exc.errors
+    try:
+        inputs = formulas.inputs(db, body.atom_id, merged)
+    except formulas.FormulaError:
+        inputs = []
+    return {"valid": not errors, "values": values if not errors else None, "errors": errors, "formula_inputs": inputs}
 
 
 @router.post("/atoms", status_code=202, summary="Propose a new atom (opens a change request)")

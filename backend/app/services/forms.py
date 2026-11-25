@@ -11,6 +11,8 @@ How relations shape a form (for an item whose atom is A):
   * A "Required if" T     A is hidden and optional until T's answer meets the link's condition
                           (a CEL expression over `value`; empty means "T is answered"). Then A
                           is shown and required. T must be on the form.
+  * A "Calculated from" I A's answer comes from its formula (see formulas.py), so it is read-only.
+                          It is calculated once every input I is answered. I must be on the form.
 """
 
 from __future__ import annotations
@@ -26,7 +28,7 @@ from sqlalchemy.orm import Session
 
 from app.errors import AppError, ValidationFailed, bad_request, conflict, field_error, not_found
 from app.models import AppSetting, Atom, AtomRelation, ChangeRequest, Form, FormItem, FormSection, FormVersion, User
-from app.services import expressions
+from app.services import expressions, formulas
 from app.services.fields import KEY_PATTERN, check_config
 from app.services.validation import is_empty, validate_value
 
@@ -50,8 +52,11 @@ DEFAULT_INPUT_SETTINGS = {
     "regex_field": None,
     # A list field holding the allowed answers. When set and non-empty, the atom becomes a choice.
     "choices_field": None,
+    # A text field holding the atom's answer formula (see formulas.py). Atoms with one are calculated on forms.
+    "formula_field": "formula",
 }
-_SETTING_FIELDS = ("type_field", "min_length_field", "max_length_field", "min_field", "max_field", "regex_field", "choices_field")
+_SETTING_FIELDS = ("type_field", "min_length_field", "max_length_field", "min_field", "max_field", "regex_field", "choices_field",
+                   "formula_field")
 
 
 def input_settings(db: Session) -> dict:
@@ -406,7 +411,7 @@ def resolve(db: Session, form: Form) -> tuple[dict, list[dict]]:
         seen_suggestions.add((code, atom.id))
         issues.append(_issue(severity, code, message, item, atom if atom.status == "active" else None))
 
-    rules: dict[str, dict] = {i.key: {"conditions": [], "parent": None, "depends_on": [], "includes": []} for i in items}
+    rules: dict[str, dict] = {i.key: {"conditions": [], "parent": None, "depends_on": [], "includes": [], "inputs": []} for i in items}
     for r in rels:
         rt = r.relation_type
         if rt.status != "active":
@@ -433,7 +438,14 @@ def resolve(db: Session, form: Form) -> tuple[dict, list[dict]]:
             elif atoms.get(tgt):
                 suggest("error", "missing_trigger",
                         f"{name(src)} is required if {name(tgt)} is answered, but {name(tgt)} isn't on the form.", sk, atoms[tgt])
+        elif rt.key == formulas.LINK_TYPE and sk:
+            ref = (r.attributes or {}).get("ref")
+            if tk:
+                rules[sk]["inputs"].append({"ref": ref, "key": tk, "atom_id": str(tgt), "atom_name": name(tgt)})
+            elif atoms.get(tgt):
+                suggest("error", "missing_input", f"{name(src)} is calculated from {name(tgt)}, which isn't on the form.", sk, atoms[tgt])
 
+    formula_key = settings.get("formula_field")
     sections_out = []
     for s in form.sections:
         if not s.items:
@@ -454,7 +466,26 @@ def resolve(db: Session, form: Form) -> tuple[dict, list[dict]]:
                                          f"{c['atom_name']} comes after {i.label or name(i.atom_id)}, which depends on its answer.", i.key))
                 if c["condition"] and (msg := _condition_error(c["condition"])):
                     issues.append(_issue("error", "invalid_condition", f"The condition on {name(i.atom_id)} is invalid: {msg}", i.key))
-            out_items.append({
+            calculation = None
+            formula = values.get(formula_key) if formula_key else None
+            if formula:
+                calculation = {"formula": formula, "inputs": r["inputs"]}
+                label = i.label or name(i.atom_id)
+                try:
+                    _, refs = formulas.parse(formula)
+                except formulas.FormulaError as exc:
+                    refs = None
+                    issues.append(_issue("error", "invalid_formula", f"The formula of {name(i.atom_id)} is invalid: {exc.message}", i.key))
+                linked = {inp["ref"] for inp in r["inputs"]}
+                if refs is not None and any(ref not in linked for ref in refs) and not any(
+                        x["code"] == "missing_input" and x["item"] == i.key for x in issues):
+                    issues.append(_issue("error", "unbound_formula",
+                                         f"The formula of {name(i.atom_id)} uses atoms it isn't linked to. Save the atom again to fix its links.", i.key))
+                if i.required:
+                    issues.append(_issue("error", "required_calculated", f"{label} is calculated, so it can't also be always required.", i.key))
+                if r["conditions"]:
+                    issues.append(_issue("error", "conditional_calculated", f"{label} is calculated, so it can't be Required if another answer.", i.key))
+            out_item = {
                 "key": i.key,
                 "atom_id": str(i.atom_id),
                 "atom_revision": atom.revision if atom else None,
@@ -469,7 +500,10 @@ def resolve(db: Session, form: Form) -> tuple[dict, list[dict]]:
                 "conditions": r["conditions"],
                 "parent": r["parent"],
                 "depends_on": r["depends_on"],
-            })
+            }
+            if calculation:
+                out_item["calculation"] = calculation
+            out_items.append(out_item)
         sections_out.append({"title": s.title, "description": s.description, "items": out_items})
 
     if not items:
@@ -543,7 +577,7 @@ def diff(old: dict | None, new: dict) -> dict:
         what = []
         if a[k]["atom_revision"] != b[k]["atom_revision"]:
             what.append(f"atom revision {a[k]['atom_revision']} → {b[k]['atom_revision']}")
-        for f in ("label", "help_text", "required", "input", "conditions"):
+        for f in ("label", "help_text", "required", "input", "conditions", "calculation"):
             if a[k].get(f) != b[k].get(f):
                 what.append(f.replace("_", " "))
         if what:
@@ -585,23 +619,66 @@ def _condition_met(condition: str | None, trigger: dict, value) -> bool:
     return bool(result)
 
 
-def validate_answers(definition: dict, answers: dict) -> dict:
+def _calculate(items: list[dict], by_key: dict, clean: dict, errors: dict, now=None) -> None:
+    """Fill in calculated answers, in an order where inputs come first. Inputs that are calculated
+    themselves are fine (links can't loop). An item with an unanswered input stays empty."""
+    pending = [i for i in items if i.get("calculation")]
+    for _ in range(len(pending) + 1):
+        if not pending:
+            return
+        waiting = []
+        for i in pending:
+            inputs = i["calculation"]["inputs"]
+            if any(by_key[inp["key"]].get("calculation") and inp["key"] not in clean and
+                   any(p["key"] == inp["key"] for p in pending) for inp in inputs):
+                waiting.append(i)
+                continue
+            if any(inp["key"] not in clean for inp in inputs):
+                continue
+            spec = i["input"]
+            try:
+                variables = {inp["ref"]: expressions.to_cel(clean[inp["key"]], by_key[inp["key"]]["input"]["type"],
+                                                            by_key[inp["key"]]["input"].get("config"))
+                             for inp in inputs}
+                result = formulas.evaluate(i["calculation"]["formula"], variables, now)
+                if spec["type"] == "boolean":
+                    if not isinstance(result, (celtypes.BoolType, bool)):
+                        raise expressions.ExpressionError("type", "the formula must return true or false")
+                    value = bool(result)
+                else:
+                    value = expressions.from_cel(result, spec["type"], spec.get("config"))
+            except expressions.ExpressionError as exc:
+                errors[i["key"]] = exc.message
+                continue
+            value, msgs = _clean_answer(i, value)
+            if msgs:
+                errors[i["key"]] = f"the result {value!r} " + "; ".join(msgs)
+                continue
+            clean[i["key"]] = value
+        if len(waiting) == len(pending):
+            return
+        pending = waiting
+
+
+def validate_answers(definition: dict, answers: dict, now=None) -> dict:
     """Check a set of answers against a form definition.
 
     Returns which items are visible and required, the cleaned answers and every error. Answers
-    to items that are hidden are not errors; they're listed under `ignored`.
+    to items that are hidden are not errors; they're listed under `ignored`. Calculated items
+    get their answer from their formula; answers sent for them are ignored too.
     """
     if not isinstance(answers, dict):
         raise bad_request("bad_answers", "answers must be an object keyed by item key.")
     items = [i for s in definition["sections"] for i in s["items"]]
     by_key = {i["key"]: i for i in items}
+    calculated = {i["key"] for i in items if i.get("calculation")}
     errors: list[dict] = []
     clean: dict = {}
     for key, value in answers.items():
         if key not in by_key:
             errors.append(field_error(key, "unknown_field", f"This form has no question {key!r}."))
             continue
-        if is_empty(value):
+        if is_empty(value) or key in calculated:
             continue
         v, msgs = _clean_answer(by_key[key], value)
         if msgs:
@@ -609,6 +686,8 @@ def validate_answers(definition: dict, answers: dict) -> dict:
         else:
             clean[key] = v
 
+    calc_errors: dict[str, str] = {}
+    _calculate(items, by_key, clean, calc_errors, now)
     visible = {i["key"] for i in items if not i["conditions"]}
     condition_errors: dict[str, str] = {}
     changed = True
@@ -631,18 +710,32 @@ def validate_answers(definition: dict, answers: dict) -> dict:
                     break
 
     fields = []
+    hidden = {k for k in by_key if k not in visible}
+    if any(k in clean for k in hidden):
+        # Answers to hidden questions don't count, so calculate again without them.
+        for k in hidden | calculated:
+            clean.pop(k, None)
+        calc_errors.clear()
+        _calculate(items, by_key, clean, calc_errors, now)
     for i in items:
         shown = i["key"] in visible
-        required = shown and (i["required"] or bool(i["conditions"]))
-        fields.append({"key": i["key"], "visible": shown, "required": required})
+        is_calc = i["key"] in calculated
+        required = shown and not is_calc and (i["required"] or bool(i["conditions"]))
+        f = {"key": i["key"], "visible": shown, "required": required}
+        if is_calc:
+            f["calculated"] = True
+            f["value"] = clean.get(i["key"])
+        fields.append(f)
+        if i["key"] in calc_errors:
+            errors.append(field_error(i["key"], "calculation_failed", f"{i['label']} could not be calculated: {calc_errors[i['key']]}"))
         if required and i["key"] not in clean and not any(e["field"] == i["key"] for e in errors):
             errors.append(field_error(i["key"], "required", f"{i['label']} is required."))
         if i["key"] in condition_errors:
             errors.append(field_error(i["key"], "condition_failed", f"The condition for {i['label']} failed: {condition_errors[i['key']]}"))
-    hidden = {k for k in by_key if k not in visible}
-    ignored = sorted(k for k, v in answers.items() if k in hidden and not is_empty(v))
+    ignored = sorted(k for k, v in answers.items() if (k in hidden or k in calculated) and k in by_key and not is_empty(v))
     for k in ignored:
-        clean.pop(k, None)
+        if k not in calculated:
+            clean.pop(k, None)
     errors = [e for e in errors if e["field"] not in hidden or e["code"] == "condition_failed"]
     return {"valid": not errors, "answers": clean, "fields": fields, "errors": errors, "ignored": ignored}
 

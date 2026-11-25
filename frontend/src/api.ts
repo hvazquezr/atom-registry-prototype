@@ -255,6 +255,7 @@ export interface ResolvedItem {
   conditions: FormCondition[]
   parent: string | null
   depends_on: string[]
+  calculation?: { formula: string; inputs: { ref: string; key: string; atom_id: string; atom_name: string | null }[] }
 }
 
 export interface FormDefinition {
@@ -342,7 +343,7 @@ export interface AnswerCheck {
   valid: boolean
   version: number | 'draft'
   answers: Values
-  fields: { key: string; visible: boolean; required: boolean }[]
+  fields: { key: string; visible: boolean; required: boolean; calculated?: boolean; value?: unknown }[]
   errors: FieldError[]
   ignored: string[]
 }
@@ -357,4 +358,12 @@ export interface InputSettings {
   max_field: string | null
   regex_field: string | null
   choices_field: string | null
+  formula_field: string | null
+}
+
+/** The name an atom goes by after @ in formulas, e.g. "Date of birth" -> date_of_birth. */
+export function refName(name: unknown): string {
+  let s = String(name ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
+  if (s && !/^[a-z]/.test(s)) s = 'a_' + s
+  return s
 }

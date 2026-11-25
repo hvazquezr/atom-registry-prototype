@@ -212,3 +212,4 @@ class FormInputSettings(BaseModel):
     max_field: str | None = None
     regex_field: str | None = None
     choices_field: str | None = None
+    formula_field: str | None = None

@@ -12,6 +12,7 @@ from app.config import get_settings
 from app.errors import AppError, ValidationFailed, bad_request, conflict, field_error, not_found
 from app.models import Atom, AtomRelation, ChangeRequest, User
 from app.services import atoms as atom_service
+from app.services import formulas
 from app.services import relations as rel_service
 from app.services.fields import require_schema
 from app.services.validation import validate_atom_values
@@ -75,6 +76,9 @@ def _check_relations(db: Session, atom_id: uuid.UUID | None, rels: dict) -> list
         except AppError as exc:
             errors.append(field_error(where, "unknown_type", exc.message))
             continue
+        if rt.key == formulas.LINK_TYPE:
+            errors.append(field_error(where, "managed", "Calculated from links come from the atom's formula. Edit the formula instead."))
+            continue
         try:
             target = db.get(Atom, uuid.UUID(item["target_atom_id"]))
         except ValueError:
@@ -105,6 +109,8 @@ def _check_relations(db: Session, atom_id: uuid.UUID | None, rels: dict) -> list
             rel = None
         if not rel or atom_id not in (rel.source_atom_id, rel.target_atom_id):
             errors.append(field_error("relations.remove", "unknown_relation", f"Relation {rid} is not linked to this atom."))
+        elif rel.relation_type.key == formulas.LINK_TYPE:
+            errors.append(field_error("relations.remove", "managed", "Calculated from links come from the atom's formula. Edit the formula instead."))
     if errors:
         raise ValidationFailed(errors)
     return clean
@@ -113,11 +119,11 @@ def _check_relations(db: Session, atom_id: uuid.UUID | None, rels: dict) -> list
 def _validate(db: Session, kind: str, atom: Atom | None, values: dict, rels: dict) -> dict:
     schema = require_schema(db)
     if kind == "create":
-        validate_atom_values(schema.fields, values)
+        formulas.check(db, None, validate_atom_values(schema.fields, values))
     elif kind == "update":
         if not values and not rels["add"] and not rels["remove"]:
             raise bad_request("empty_change", "The change request doesn't change anything.")
-        validate_atom_values(schema.fields, values, existing=atom.values)
+        formulas.check(db, atom.id, validate_atom_values(schema.fields, values, existing=atom.values))
     elif values or rels["add"] or rels["remove"]:
         raise bad_request("bad_change", f"A {kind} request can't change values or relations.")
     rels["add"] = _check_relations(db, atom.id if atom else None, rels)
@@ -277,6 +283,8 @@ def approve(db: Session, user: User, cr: ChangeRequest, comment: str = "") -> tu
             rel_service.add_link(db, rt, src, tgt, attrs, cr.submitted_by, note=item.get("note") or "")
         except AppError as exc:
             raise ValidationFailed([field_error("relations", exc.code, exc.message)]) from exc
+    if cr.kind in ("create", "update"):
+        formulas.sync_links(db, atom, cr.submitted_by)
     if (rels["add"] or rels["remove"]) and cr.kind == "update" and not cr.proposed_values:
         summary = "Updated relations"
     elif rels["add"] or rels["remove"]:

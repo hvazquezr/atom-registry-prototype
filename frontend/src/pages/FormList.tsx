@@ -125,6 +125,7 @@ function InputSettingsCard() {
         {pick('Maximum value', 'max_field', ['number', 'date'])}
         {pick('Pattern (regex)', 'regex_field', ['text'])}
         {pick('Allowed answers', 'choices_field', ['list'])}
+        {pick('Answer formula (@ refers to other atoms)', 'formula_field', ['text'])}
       </div>
       <ErrorBox error={save.error} />
       {draft && (

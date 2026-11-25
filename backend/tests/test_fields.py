@@ -8,8 +8,8 @@ def test_create_field_and_publish_schema(admin):
     v = publish(admin)
     assert v["version"] == 2
     schema = admin.get("/api/v1/schema").json()
-    assert [f["key"] for f in schema["fields"]] == ["name", "description", "size"]
-    assert {r["key"] for r in schema["relation_types"]} == {"dependency", "includes", "required_if"}
+    assert [f["key"] for f in schema["fields"]] == ["name", "description", "formula", "size"]
+    assert {r["key"] for r in schema["relation_types"]} == {"dependency", "includes", "required_if", "calculated_from"}
     r = admin.post("/internal/schema/publish", json={})
     assert r.status_code == 409 and r.json()["error"]["code"] == "no_changes"
 

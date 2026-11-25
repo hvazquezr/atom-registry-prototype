@@ -27,6 +27,9 @@ BUILT_IN_FIELDS = [
      "description": "Short, unique-ish name of the atom."},
     {"key": "description", "label": "Description", "type": "text", "required": False, "config": {"max_length": 5000},
      "description": "What the atom represents and how it is used."},
+    {"key": "formula", "label": "Formula", "type": "text", "required": False, "config": {"max_length": 2000},
+     "description": "Fill in only when this atom's answer on a form is calculated from other atoms. "
+                    "Refer to them with @, e.g. @weight / (@height * @height)."},
 ]
 
 # A CEL condition on the other atom's answer, e.g. `value == true`. Empty means "is answered".
@@ -48,6 +51,10 @@ RELATION_TYPES = [
      "description": "This atom becomes required when the other atom is present or answered.", "directed": True,
      "cardinality": "many_to_many", "allow_cycles": True, "require_note": True,
      "attributes": [REQUIRED_IF_CONDITION]},
+    {"key": "calculated_from", "label": "Calculated from", "inverse_label": "Used to calculate",
+     "description": "This atom's answer is calculated from the other atom's answer. Set by the atom's formula.",
+     "directed": True, "cardinality": "many_to_many", "allow_cycles": False, "require_note": False,
+     "attributes": [{"key": "ref", "label": "Name in formula", "type": "text", "config": {"max_length": 64}}]},
 ]
 
 DEMO_FIELDS = [

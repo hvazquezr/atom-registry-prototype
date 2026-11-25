@@ -94,6 +94,7 @@ function ItemRow({
 }) {
   const [open, setOpen] = useState(false)
   const conditional = (resolved?.conditions.length ?? 0) > 0
+  const calc = resolved?.calculation
   return (
     <div className={`form-item ${resolved?.parent ? 'child' : ''} ${resolved?.atom_status === 'deprecated' ? 'deprecated' : ''}`} {...dragProps}>
       <div className="row spread">
@@ -106,6 +107,7 @@ function ItemRow({
               {resolved && <span className="pill gray">{ANSWER_LABELS[resolved.input.answer_type] ?? resolved.input.answer_type}</span>}
               {item.required && <span className="pill blue">required</span>}
               {conditional && <span className="pill warn">conditional</span>}
+              {calc && <span className="pill blue" title={calc.formula}>calculated</span>}
               {resolved?.atom_status === 'deprecated' && <span className="pill rejected">deprecated atom</span>}
             </div>
             <div className="muted small">
@@ -113,6 +115,7 @@ function ItemRow({
               {resolved?.parent && <> · grouped under <span className="mono">{resolved.parent}</span></>}
               {resolved && resolved.conditions.length > 0 && <> · shown and required when {resolved.conditions.map(conditionText).join(' or ')}</>}
               {resolved && resolved.depends_on.length > 0 && <> · depends on {resolved.depends_on.join(', ')}</>}
+              {calc && <> · calculated from {calc.inputs.length ? calc.inputs.map((i) => i.key).join(', ') : 'atoms not on the form yet'}</>}
             </div>
           </div>
         </div>
@@ -146,10 +149,11 @@ function ItemRow({
               onChange={(e) => onChange({ help_text: e.target.value }, false)} onBlur={() => onChange({}, true)} />
           </div>
           <label className="check">
-            <input type="checkbox" checked={item.required} disabled={conditional && !item.required}
+            <input type="checkbox" checked={item.required} disabled={(conditional || !!calc) && !item.required}
               onChange={(e) => onChange({ required: e.target.checked }, true)} />
             Always required on this form
             {conditional && <span className="muted small"> (not available: this atom is Required if another answer)</span>}
+            {calc && <span className="muted small"> (not available: this atom is calculated)</span>}
           </label>
         </div>
       )}
@@ -489,6 +493,21 @@ function Preview({ form, version, setVersion }: { form: FormDetail; version: str
                   const visible = st ? st.visible : it.conditions.length === 0
                   if (!visible) return null
                   const required = st ? st.required : it.required
+                  if (it.calculation) {
+                    const v = st?.value
+                    return (
+                      <div key={it.key} className={`preview-item calculated ${it.parent ? 'child' : ''}`}>
+                        <div className={`form-field ${errors[it.key] ? 'has-error' : ''}`}>
+                          <label>{it.label} <span className="pill blue">calculated</span></label>
+                          {it.help_text && <div className="muted small">{it.help_text}</div>}
+                          <div className="calc-value">
+                            {v === undefined || v === null ? <span className="muted">Filled in once {it.calculation.inputs.map((i) => i.atom_name ?? i.key).join(' and ')} {it.calculation.inputs.length > 1 ? 'are' : 'is'} answered</span> : String(v)}
+                          </div>
+                          {errors[it.key] && <div className="field-error">{errors[it.key]}</div>}
+                        </div>
+                      </div>
+                    )
+                  }
                   return (
                     <div key={it.key} className={`preview-item ${it.parent ? 'child' : ''} ${it.conditions.length ? 'conditional' : ''}`}>
                       {it.input.type === 'boolean' ? (
@@ -515,7 +534,13 @@ function Preview({ form, version, setVersion }: { form: FormDetail; version: str
                 {check.data.fields.filter((f) => f.visible).length} of {check.data.fields.length} questions shown ·{' '}
                 {check.data.fields.filter((f) => f.required).length} required now
               </div>
-              {check.data.ignored.length > 0 && <div className="muted small">Ignored (hidden): {check.data.ignored.join(', ')}</div>}
+              {check.data.ignored.length > 0 && <div className="muted small">Ignored (hidden or calculated): {check.data.ignored.join(', ')}</div>}
+              {check.data.fields.some((f) => f.calculated) && (
+                <>
+                  <h4>Calculated</h4>
+                  <pre className="json">{JSON.stringify(Object.fromEntries(check.data.fields.filter((f) => f.calculated).map((f) => [f.key, f.value ?? null])), null, 2)}</pre>
+                </>
+              )}
               <h4>Answers sent to the API</h4>
               <pre className="json">{JSON.stringify({ version: version === 'draft' ? 'draft' : Number(version), answers }, null, 2)}</pre>
             </>
