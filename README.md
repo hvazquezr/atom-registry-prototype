@@ -21,6 +21,13 @@ token-protected API to search, read, create and update them.
   *Calculated from* link (kept in step with the formula, never edited by hand), so renaming an input
   atom later doesn't break the formula. On a form the atom is read-only and fills in once every input is
   answered; publishing is blocked until every input atom is on the form, and loops are refused.
+- **Records.** Saved answers to a published form. Forms are the record types, so there's nothing new
+  to define: pick a form on the *Records* page, click *New record*, fill it in and save. Each save is
+  checked like the form preview (types, rules, *Required if*, calculated answers worked out on save).
+  A bad answer blocks the save; missing required answers don't, and the record shows as *incomplete*
+  until they're filled. Records save directly without review, every save is kept in the record's
+  history, and records can be archived and restored. A record stays on the form version it was saved
+  with until someone moves it to the latest one, which checks it again.
 - **Reviews.** Every create, edit, relation change or deprecation of an atom, and every publish or
   deprecation of a form, is a change request. Anyone with the reviewer role can approve it, except the
   person who submitted it. Admins can approve their own requests too.
@@ -34,7 +41,7 @@ With Docker:
 docker compose up --build
 ```
 
-Then open http://localhost:5173 and sign in as `admin`, `editor` or `reviewer` (password `changeme`,
+Then open http://localhost:5173 and sign in as `admin`, `editor`, `reviewer` or `records` (password `changeme`,
 set with `ATOM_SEED_PASSWORD`). Demo fields and atoms are loaded unless `SEED_DEMO=` is empty. The API
 docs are at http://localhost:8000/docs.
 
@@ -78,6 +85,7 @@ Other systems ─/api/v1─┘
 | `atom_revision` | Snapshot of values and relations after each approved change |
 | `form`, `form_section`, `form_item` | A form's draft: sections, the atoms in them, and per-form label, help text and "always required" |
 | `form_version` | A published form, fully resolved: items, input rules, conditions, pinned atom revisions and values |
+| `record`, `record_revision` | Saved answers to a form version (JSONB, GIN-indexed), what's still missing, status; a snapshot after every save |
 | `app_setting` | Admin settings, such as which atom fields decide a form input's type and rules |
 | `app_user`, `api_token` | Users with roles; hashed tokens with scopes |
 
@@ -125,9 +133,10 @@ or with `POST /internal/tokens`. A token can have fewer scopes than its user, ne
 
 | Role | Scopes |
 | --- | --- |
-| viewer | `atoms:read`, `forms:read` |
-| editor | `atoms:read`, `atoms:write` (submit change requests), `forms:read`, `forms:write` (build forms, submit them) |
+| viewer | `atoms:read`, `forms:read`, `records:read` |
+| atom_editor (Atom editor) | `atoms:read`, `atoms:write` (submit change requests), `forms:read`, `forms:write` (build forms, submit them) |
 | reviewer | `atoms:read`, `atoms:approve` (atoms and forms), `forms:read` |
+| record_manager (Record manager) | `atoms:read`, `forms:read`, `records:read`, `records:write` (create, edit, archive and restore records) |
 | admin | all, including `schema:admin` and `users:admin` |
 
 An external identity provider (OIDC/JWT) can be added later in `app/auth.py` without changing routes.
@@ -169,6 +178,23 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
   localhost:8000/api/v1/forms/signup/publish -d '{"notes": "First version"}'
 ```
 
+```bash
+# records: saved against the form's latest version; missing required answers are allowed
+curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  localhost:8000/api/v1/records -d '{"form": "person_details", "answers": {"first_name": "Grace"}}'
+# → 201 {"id": "...", "form_version": 1, "complete": false, "missing": ["last_name"], ...}
+
+# change some answers (null clears one), or move to the latest form version with "form_version": "latest"
+curl -X PATCH -H "Authorization: Bearer $TOKEN" -H "If-Match: 1" -H "Content-Type: application/json" \
+  localhost:8000/api/v1/records/<uuid> -d '{"answers": {"last_name": "Hopper"}}'
+
+# search one form's records by text and answers; history; archive and restore
+curl -H "Authorization: Bearer $TOKEN" \
+  "localhost:8000/api/v1/records?form=person_details&q=hopper&filter[annual_income][gte]=50000&complete=true"
+curl -H "Authorization: Bearer $TOKEN" localhost:8000/api/v1/records/<uuid>/revisions
+curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" localhost:8000/api/v1/records/<uuid>/archive -d '{}'
+```
+
 Filter operators: `eq` (default), `ne`, `in` (comma-separated), `gt`, `gte`, `lt`, `lte`,
 `contains`, `exists`. The full reference is at `/docs`.
 
@@ -187,7 +213,6 @@ All settings are environment variables (see `backend/.env.example`):
 
 ## Not in this prototype
 
-- Forms that group atoms (the tables above leave room for `form` and `form_atom`).
 - Login through the larger system's identity provider.
 - A scheduler for the daily refresh; use cron or the endpoint.
 - Approval for schema changes (admins publish directly).

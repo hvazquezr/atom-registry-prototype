@@ -213,3 +213,18 @@ class FormInputSettings(BaseModel):
     regex_field: str | None = None
     choices_field: str | None = None
     formula_field: str | None = None
+
+
+class RecordCreate(BaseModel):
+    form: str = Field(..., description="The form's key or id. The record is saved against its latest published version.")
+    answers: dict[str, Any] = Field(default_factory=dict, description="Answers keyed by question key. Required ones can be left out for now.")
+
+
+class RecordPatch(BaseModel):
+    answers: dict[str, Any] = Field(default_factory=dict, description="Only the answers that change; null clears one.")
+    form_version: Literal["latest"] | None = Field(None, description="Set to latest to move the record to the form's latest version.")
+    base_revision: int | None = Field(None, description="Revision you edited (or send If-Match).")
+
+
+class RecordStatusChange(BaseModel):
+    base_revision: int | None = None

@@ -89,6 +89,11 @@ def reviewer(client):
 
 
 @pytest.fixture
+def records(client):
+    return Api(client, "records")
+
+
+@pytest.fixture
 def make_atom(editor, reviewer):
     """Create and approve an atom; returns its JSON."""
 

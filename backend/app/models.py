@@ -316,3 +316,52 @@ class AppSetting(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
+
+
+# --- Records ----------------------------------------------------------------------------
+#
+# A record is saved data: answers to one published form version, keyed by the form's question
+# keys. Forms are the record types, so there is no separate definition. Records save directly
+# (no review); every save writes a record_revision.
+
+
+class Record(TimestampMixin, Base):
+    __tablename__ = "record"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    form_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("form.id"))
+    form_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Cleaned answers, calculated ones included. Answers to hidden questions are not kept.
+    answers: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    # Required questions still unanswered. A record with none is complete.
+    missing: Mapped[list[str]] = mapped_column(ARRAY(String), nullable=False, default=list)
+    complete: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")  # active | archived
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    search_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.id"))
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.id"))
+
+    __table_args__ = (
+        Index("ix_record_answers", "answers", postgresql_using="gin", postgresql_ops={"answers": "jsonb_path_ops"}),
+        Index("ix_record_form_status", "form_id", "status"),
+    )
+
+
+class RecordRevision(Base):
+    __tablename__ = "record_revision"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    record_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("record.id", ondelete="CASCADE"), index=True)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    form_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    answers: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    complete: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    changed_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.id"))
+    changed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (UniqueConstraint("record_id", "revision"),)

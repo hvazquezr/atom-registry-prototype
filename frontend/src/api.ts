@@ -367,3 +367,39 @@ export function refName(name: unknown): string {
   if (s && !/^[a-z]/.test(s)) s = 'a_' + s
   return s
 }
+
+// --- Records ------------------------------------------------------------------------------
+
+export interface RecordItem {
+  id: string
+  form: { id: string; key: string; name: string; status: 'active' | 'deprecated' }
+  form_version: number
+  latest_form_version: number | null
+  title: string
+  answers: Values
+  missing: string[]
+  complete: boolean
+  status: 'active' | 'archived'
+  revision: number
+  created_at: string
+  updated_at: string
+  created_by_name: string | null
+  updated_by_name: string | null
+  fields?: AnswerCheck['fields']
+  dropped?: string[]
+}
+
+export interface RecordRevision {
+  revision: number
+  form_version: number
+  answers: Values
+  complete: boolean
+  status: 'active' | 'archived'
+  summary: string
+  changed_by_name: string | null
+  changed_at: string
+}
+
+export const ROLE_LABELS: Record<string, string> = {
+  viewer: 'Viewer', atom_editor: 'Atom editor', reviewer: 'Reviewer', record_manager: 'Record manager', admin: 'Admin',
+}
