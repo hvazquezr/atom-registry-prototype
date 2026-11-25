@@ -6,7 +6,7 @@ token-protected API to search, read, create and update them.
 
 - **Meta atom.** Fields of type text, number, date, list or options (single or multiple choice).
   Each can be mandatory or optional, with range, length and regex rules. Calculated fields are single
-  [CEL](https://cel.dev) expressions over other fields, with `today()` and `now()`. Field edits go to a
+  [CEL](https://cel.dev) expressions over other fields, written `@key` like atom formulas (`@qty * @unit_price`), with `today()` and `now()`. Field edits go to a
   draft and become live when the schema is published as a new version.
 - **Relations.** Typed links between atoms: *Depends on*, *Includes* and *Required if* out of the box,
   each with a note. Admins can add types with their own direction, cardinality and loop rules.
