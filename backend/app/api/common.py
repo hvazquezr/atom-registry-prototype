@@ -4,7 +4,7 @@ import uuid
 
 from sqlalchemy.orm import Session
 
-from app.models import Atom, ChangeRequest
+from app.models import Atom, ChangeRequest, Form
 from app.services import change_requests as cr_service
 from app.services import relations as rel_service
 
@@ -16,6 +16,18 @@ def enrich_change_request(db: Session, cr: ChangeRequest, detail: bool = False) 
     d["atom_name"] = (atom.values.get("name") if atom else None) or (cr.proposed_values or {}).get("name")
     d["atom_status"] = atom.status if atom else None
     d["stale"] = bool(atom and cr.status == "pending" and cr.base_revision is not None and atom.revision != cr.base_revision)
+    if cr.form_id:
+        from app.services import forms as form_service
+
+        form = db.get(Form, cr.form_id)
+        d["form_name"] = form.name if form else None
+        d["form_key"] = form.key if form else None
+        d["form_status"] = form.status if form else None
+        d["stale"] = bool(form and cr.status == "pending" and cr.base_revision is not None and form.draft_revision != cr.base_revision)
+        if detail:
+            d["current_revision"] = form.draft_revision if form else None
+            d["form_preview"] = form_service.request_preview(db, cr)
+        return d
     if detail:
         d["current_values"] = atom.values if atom else None
         d["current_revision"] = atom.revision if atom else None

@@ -3,7 +3,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api import internal, v1
+from app.api import forms, internal, v1
 from app.config import get_settings
 from app.errors import AppError
 
@@ -49,4 +49,5 @@ def health():
 
 
 app.include_router(v1.router)
+app.include_router(forms.router)
 app.include_router(internal.router)

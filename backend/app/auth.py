@@ -29,14 +29,16 @@ from app.models import ApiToken, User
 SCOPES = {
     "atoms:read": "Search and read atoms, relations and the schema",
     "atoms:write": "Submit change requests",
-    "atoms:approve": "Approve or reject change requests",
+    "atoms:approve": "Approve or reject change requests (atoms and forms)",
+    "forms:read": "Search and read forms, their versions, and check answers",
+    "forms:write": "Create forms, edit drafts and submit them for review",
     "schema:admin": "Edit field definitions and relation types, publish the schema",
     "users:admin": "Manage users and their tokens",
 }
 ROLE_SCOPES = {
-    "viewer": {"atoms:read"},
-    "editor": {"atoms:read", "atoms:write"},
-    "reviewer": {"atoms:read", "atoms:approve"},
+    "viewer": {"atoms:read", "forms:read"},
+    "editor": {"atoms:read", "atoms:write", "forms:read", "forms:write"},
+    "reviewer": {"atoms:read", "atoms:approve", "forms:read"},
     "admin": set(SCOPES),
 }
 ROLES = tuple(ROLE_SCOPES)

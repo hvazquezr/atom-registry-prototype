@@ -74,7 +74,7 @@ export interface RelationType {
   cardinality: 'one_to_one' | 'one_to_many' | 'many_to_one' | 'many_to_many'
   allow_cycles: boolean
   require_note: boolean
-  attributes: unknown[]
+  attributes: (Omit<Field, 'expression'> & { expression?: boolean })[]
   status: 'active' | 'deprecated'
 }
 
@@ -89,6 +89,7 @@ export interface Relation {
   other_atom_name: string | null
   source_atom_id: string
   target_atom_id: string
+  attributes?: Values
 }
 
 export interface RelationAdd {
@@ -96,6 +97,7 @@ export interface RelationAdd {
   target_atom_id: string
   direction: 'out' | 'in'
   note: string
+  attributes?: Values
 }
 
 export interface ChangeRequest {
@@ -103,7 +105,11 @@ export interface ChangeRequest {
   atom_id: string | null
   atom_name: string | null
   atom_status: string | null
-  kind: 'create' | 'update' | 'deprecate' | 'restore'
+  form_id?: string | null
+  form_name?: string | null
+  form_key?: string | null
+  form_preview?: FormRequestPreview | null
+  kind: 'create' | 'update' | 'deprecate' | 'restore' | 'publish_form' | 'deprecate_form' | 'restore_form'
   proposed_values: Values
   proposed_relations: { add?: RelationAdd[]; remove?: string[] }
   base_revision: number | null
@@ -215,4 +221,140 @@ export function qs(params: Record<string, string | number | undefined | null>): 
 export function atomName(values: Values | null | undefined, fallback = 'Untitled'): string {
   const n = values?.name
   return typeof n === 'string' && n ? n : fallback
+}
+
+// --- Forms --------------------------------------------------------------------------------
+
+export type InputType = 'text' | 'number' | 'date' | 'options' | 'boolean'
+
+export interface FormInput {
+  type: InputType
+  answer_type: string
+  config: FieldConfig
+}
+
+export interface FormCondition {
+  when: string
+  atom_id: string
+  atom_name: string | null
+  condition: string | null
+  note: string
+}
+
+export interface ResolvedItem {
+  key: string
+  atom_id: string
+  atom_revision: number | null
+  atom_name: string | null
+  atom_status: string | null
+  label: string
+  help_text: string
+  required: boolean
+  input: FormInput
+  atom_values: Values
+  conditions: FormCondition[]
+  parent: string | null
+  depends_on: string[]
+}
+
+export interface FormDefinition {
+  form: { id: string; key: string; name: string; description: string }
+  version?: number | 'draft'
+  published_at?: string
+  notes?: string
+  sections: { title: string; description: string; items: ResolvedItem[] }[]
+}
+
+export interface DraftItem {
+  id?: string
+  atom_id: string
+  key: string | null
+  label: string
+  help_text: string
+  required: boolean
+}
+
+export interface DraftSection {
+  id?: string
+  title: string
+  description: string
+  items: DraftItem[]
+}
+
+export interface FormIssue {
+  severity: 'error' | 'warning'
+  code: string
+  message: string
+  item: string | null
+  add_atom_id?: string
+  add_atom_name?: string
+}
+
+export interface FormVersionSummary {
+  version: number
+  notes: string
+  item_count: number
+  published_at: string
+  published_by_name: string | null
+  approved_by_name: string | null
+  change_request_id: string | null
+}
+
+export interface FormDiff {
+  added: { key: string; label: string }[]
+  removed: { key: string; label: string }[]
+  changed: { key: string; label: string; changes: string[] }[]
+  sections_changed: boolean
+  details_changed: boolean
+}
+
+export interface FormSummary {
+  id: string
+  key: string
+  name: string
+  description: string
+  status: 'active' | 'deprecated'
+  draft_revision: number
+  latest_version: number | null
+  updated_at: string
+  item_count?: number
+}
+
+export interface FormDetail extends FormSummary {
+  draft: { sections: DraftSection[] }
+  resolved_draft: FormDefinition
+  issues: FormIssue[]
+  can_publish: boolean
+  versions: FormVersionSummary[]
+  atoms_updated: { key: string; atom_id: string; atom_name: string | null; pinned_revision: number; current_revision: number }[]
+  draft_changes: FormDiff
+  pending_request: ChangeRequest | null
+}
+
+export interface FormRequestPreview {
+  version: number
+  definition: FormDefinition
+  issues: FormIssue[]
+  diff: FormDiff
+}
+
+export interface AnswerCheck {
+  valid: boolean
+  version: number | 'draft'
+  answers: Values
+  fields: { key: string; visible: boolean; required: boolean }[]
+  errors: FieldError[]
+  ignored: string[]
+}
+
+export interface InputSettings {
+  type_field: string | null
+  type_map: Record<string, string>
+  default_type: string
+  min_length_field: string | null
+  max_length_field: string | null
+  min_field: string | null
+  max_field: string | null
+  regex_field: string | null
+  choices_field: string | null
 }

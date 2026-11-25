@@ -155,3 +155,60 @@ class UserUpdate(BaseModel):
     password: str | None = None
     roles: list[str] | None = None
     is_active: bool | None = None
+
+
+# --- Forms ------------------------------------------------------------------------------
+
+
+class FormItemIn(BaseModel):
+    atom_id: uuid.UUID
+    key: str | None = Field(None, description="Answer key, unique in the form. Defaults to one made from the atom's name.")
+    label: str = Field("", description="Overrides the atom's name on this form.")
+    help_text: str = Field("", description="Overrides the atom's description on this form.")
+    required: bool = Field(False, description="Always required on this form. Can't be combined with Required if.")
+
+
+class FormSectionIn(BaseModel):
+    title: str = ""
+    description: str = ""
+    items: list[FormItemIn] = Field(default_factory=list)
+
+
+class FormCreate(BaseModel):
+    key: str = Field(..., examples=["new_customer"])
+    name: str
+    description: str = ""
+    sections: list[FormSectionIn] | None = None
+
+
+class FormDraft(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    sections: list[FormSectionIn] | None = Field(None, description="Replaces every section and item of the draft.")
+    base_revision: int | None = Field(None, description="Draft revision you edited. Also accepted as the If-Match header.")
+
+
+class FormPublish(BaseModel):
+    notes: str = Field("", description="What changed, shown in the version history.")
+    comment: str = ""
+
+
+class FormStatusChange(BaseModel):
+    comment: str = ""
+
+
+class FormAnswers(BaseModel):
+    version: int | Literal["latest", "draft"] = Field("latest", description="Published version number, latest, or draft.")
+    answers: dict[str, Any] = Field(default_factory=dict, description="Answers keyed by item key.")
+
+
+class FormInputSettings(BaseModel):
+    type_field: str | None = None
+    type_map: dict[str, str] | None = None
+    default_type: str | None = None
+    min_length_field: str | None = None
+    max_length_field: str | None = None
+    min_field: str | None = None
+    max_field: str | None = None
+    regex_field: str | None = None
+    choices_field: str | None = None
