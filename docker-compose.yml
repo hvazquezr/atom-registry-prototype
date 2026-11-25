@@ -1,0 +1,34 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: atoms
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      retries: 20
+
+  api:
+    build: ./backend
+    environment:
+      ATOM_DATABASE_URL: postgresql+psycopg://postgres:postgres@db:5432/atoms
+      ATOM_TIMEZONE: UTC
+      ATOM_SEED_PASSWORD: ${ATOM_SEED_PASSWORD:-changeme}
+      SEED_DEMO: ${SEED_DEMO:-1}
+    ports: ["8000:8000"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    build: ./frontend
+    environment:
+      ATOM_API_URL: http://api:8000
+    ports: ["5173:5173"]
+    depends_on: [api]
+
+volumes:
+  pgdata:
