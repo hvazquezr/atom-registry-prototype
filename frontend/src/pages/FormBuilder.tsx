@@ -9,7 +9,6 @@ import {
   type ChangeRequest,
   type DraftItem,
   type DraftSection,
-  type Field,
   type FormDefinition,
   type FormDetail,
   type FormDiff,
@@ -20,7 +19,7 @@ import {
 import { useAuth } from '../auth'
 import AtomPicker from '../components/AtomPicker'
 import ErrorBox from '../components/ErrorBox'
-import FieldInput from '../components/FieldInput'
+import FormFields from '../components/FormFields'
 import { formatDate } from '../hooks'
 
 type Tab = 'build' | 'preview' | 'versions' | 'requests'
@@ -94,6 +93,7 @@ function ItemRow({
 }) {
   const [open, setOpen] = useState(false)
   const conditional = (resolved?.conditions.length ?? 0) > 0
+  const calc = resolved?.calculation
   return (
     <div className={`form-item ${resolved?.parent ? 'child' : ''} ${resolved?.atom_status === 'deprecated' ? 'deprecated' : ''}`} {...dragProps}>
       <div className="row spread">
@@ -104,8 +104,7 @@ function ItemRow({
               <strong>{item.label || name}</strong>
               {item.label && <span className="muted small"> ({name})</span>}
               {resolved && <span className="pill gray">{ANSWER_LABELS[resolved.input.answer_type] ?? resolved.input.answer_type}</span>}
-              {item.required && <span className="pill blue">required</span>}
-              {conditional && <span className="pill warn">conditional</span>}
+              {calc && <span className="pill blue" title={calc.formula}>calculated</span>}
               {resolved?.atom_status === 'deprecated' && <span className="pill rejected">deprecated atom</span>}
             </div>
             <div className="muted small">
@@ -113,10 +112,23 @@ function ItemRow({
               {resolved?.parent && <> · grouped under <span className="mono">{resolved.parent}</span></>}
               {resolved && resolved.conditions.length > 0 && <> · shown and required when {resolved.conditions.map(conditionText).join(' or ')}</>}
               {resolved && resolved.depends_on.length > 0 && <> · depends on {resolved.depends_on.join(', ')}</>}
+              {calc && <> · calculated from {calc.inputs.length ? calc.inputs.map((i) => i.key).join(', ') : 'atoms not on the form yet'}</>}
             </div>
           </div>
         </div>
         <div className="row">
+          {calc ? (
+            <span className="requirement locked" title="Calculated answers are never asked, so they're neither required nor optional.">Calculated</span>
+          ) : conditional ? (
+            <span className="requirement locked" title="Set by the atom's Required if link.">Required if</span>
+          ) : editable ? (
+            <div className="segmented" role="group" aria-label="Required or optional">
+              <button className={item.required ? 'on' : ''} aria-pressed={item.required} onClick={() => !item.required && onChange({ required: true }, true)}>Required</button>
+              <button className={!item.required ? 'on' : ''} aria-pressed={!item.required} onClick={() => item.required && onChange({ required: false }, true)}>Optional</button>
+            </div>
+          ) : (
+            <span className={`requirement ${item.required ? 'req' : ''}`}>{item.required ? 'Required' : 'Optional'}</span>
+          )}
           <Link to={`/atoms/${item.atom_id}`} className="small">Atom</Link>
           {editable && (
             <>
@@ -145,12 +157,6 @@ function ItemRow({
             <textarea rows={2} value={item.help_text} placeholder={String(resolved?.atom_values.description ?? '')}
               onChange={(e) => onChange({ help_text: e.target.value }, false)} onBlur={() => onChange({}, true)} />
           </div>
-          <label className="check">
-            <input type="checkbox" checked={item.required} disabled={conditional && !item.required}
-              onChange={(e) => onChange({ required: e.target.checked }, true)} />
-            Always required on this form
-            {conditional && <span className="muted small"> (not available: this atom is Required if another answer)</span>}
-          </label>
         </div>
       )}
     </div>
@@ -406,32 +412,6 @@ function PublishCard({ form, disabled }: { form: FormDetail; disabled: boolean }
 
 // --- Preview ------------------------------------------------------------------------------
 
-function asField(item: ResolvedItem, required: boolean): Field {
-  return {
-    key: item.key, label: item.label, description: item.help_text,
-    type: item.input.type === 'boolean' ? 'options' : item.input.type,
-    required, config: item.input.config, calculated: false, expression: null, depends_on: [], time_dependent: false, position: 0,
-  }
-}
-
-function BooleanInput({ item, value, required, error, onChange }: { item: ResolvedItem; value: unknown; required: boolean; error?: string; onChange: (v: unknown) => void }) {
-  return (
-    <div className={`form-field ${error ? 'has-error' : ''}`}>
-      <label>{item.label}{required && <span className="req"> *</span>}</label>
-      {item.help_text && <div className="muted small">{item.help_text}</div>}
-      <div className="row">
-        {[true, false].map((v) => (
-          <label key={String(v)} className="check">
-            <input type="radio" name={item.key} checked={value === v} onChange={() => onChange(v)} /> {v ? 'Yes' : 'No'}
-          </label>
-        ))}
-        {value !== undefined && value !== null && <button className="link small" onClick={() => onChange(null)}>Clear</button>}
-      </div>
-      {error && <div className="field-error">{error}</div>}
-    </div>
-  )
-}
-
 function Preview({ form, version, setVersion }: { form: FormDetail; version: string; setVersion: (v: string) => void }) {
   const [answers, setAnswers] = useState<Values>({})
   const [submitted, setSubmitted] = useState(false)
@@ -451,7 +431,6 @@ function Preview({ form, version, setVersion }: { form: FormDetail; version: str
     }),
     placeholderData: keepPreviousData,
   })
-  const state = new Map(check.data?.fields.map((f) => [f.key, f]))
   const errors: Record<string, string> = {}
   for (const e of check.data?.errors ?? []) {
     if (e.code === 'required' && !submitted) continue
@@ -480,27 +459,7 @@ function Preview({ form, version, setVersion }: { form: FormDetail; version: str
           <div className="card preview">
             <h2>{definition.data.form.name}</h2>
             {definition.data.form.description && <p className="muted">{definition.data.form.description}</p>}
-            {definition.data.sections.map((s, si) => (
-              <fieldset key={si} className="preview-section">
-                {s.title && <legend>{s.title}</legend>}
-                {s.description && <div className="muted small">{s.description}</div>}
-                {s.items.map((it) => {
-                  const st = state.get(it.key)
-                  const visible = st ? st.visible : it.conditions.length === 0
-                  if (!visible) return null
-                  const required = st ? st.required : it.required
-                  return (
-                    <div key={it.key} className={`preview-item ${it.parent ? 'child' : ''} ${it.conditions.length ? 'conditional' : ''}`}>
-                      {it.input.type === 'boolean' ? (
-                        <BooleanInput item={it} value={answers[it.key]} required={required} error={errors[it.key]} onChange={(v) => set(it.key, v)} />
-                      ) : (
-                        <FieldInput field={asField(it, required)} value={answers[it.key]} error={errors[it.key]} onChange={(v) => set(it.key, v)} />
-                      )}
-                    </div>
-                  )
-                })}
-              </fieldset>
-            ))}
+            <FormFields definition={definition.data} answers={answers} check={check.data} errors={errors} onChange={set} />
             <button className="primary" onClick={() => setSubmitted(true)}>Check answers</button>
           </div>
         )}
@@ -515,7 +474,13 @@ function Preview({ form, version, setVersion }: { form: FormDetail; version: str
                 {check.data.fields.filter((f) => f.visible).length} of {check.data.fields.length} questions shown ·{' '}
                 {check.data.fields.filter((f) => f.required).length} required now
               </div>
-              {check.data.ignored.length > 0 && <div className="muted small">Ignored (hidden): {check.data.ignored.join(', ')}</div>}
+              {check.data.ignored.length > 0 && <div className="muted small">Ignored (hidden or calculated): {check.data.ignored.join(', ')}</div>}
+              {check.data.fields.some((f) => f.calculated) && (
+                <>
+                  <h4>Calculated</h4>
+                  <pre className="json">{JSON.stringify(Object.fromEntries(check.data.fields.filter((f) => f.calculated).map((f) => [f.key, f.value ?? null])), null, 2)}</pre>
+                </>
+              )}
               <h4>Answers sent to the API</h4>
               <pre className="json">{JSON.stringify({ version: version === 'draft' ? 'draft' : Number(version), answers }, null, 2)}</pre>
             </>

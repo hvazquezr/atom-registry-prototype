@@ -143,6 +143,7 @@ export default function ChangeRequestPage() {
   if (!cr.data) return <div className="muted">Loading…</div>
   const c = cr.data
   const mine = c.submitted_by === me?.id
+  const isAdmin = !!me?.roles.includes('admin')
   const pending = c.status === 'pending'
 
   return (
@@ -180,7 +181,7 @@ export default function ChangeRequestPage() {
         </div>
       )}
       <ErrorBox error={approve.error ?? reject.error ?? withdraw.error ?? rebase.error} />
-      {pending && can('atoms:approve') && !mine && (
+      {pending && can('atoms:approve') && (!mine || isAdmin) && (
         <div className="card">
           <h3>Review</h3>
           <textarea rows={2} placeholder="Comment (optional for approval, helpful for rejection)" value={reviewComment} onChange={(e) => setReviewComment(e.target.value)} />
@@ -192,7 +193,7 @@ export default function ChangeRequestPage() {
       )}
       {pending && mine && (
         <div className="actions">
-          <span className="muted small">Someone else with the reviewer role needs to approve this.</span>
+          {!isAdmin && <span className="muted small">Someone else with the reviewer role needs to approve this.</span>}
           <button onClick={() => withdraw.mutate()}>Withdraw</button>
         </div>
       )}

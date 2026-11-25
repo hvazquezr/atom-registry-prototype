@@ -20,6 +20,7 @@ from app.services import atoms as atom_service
 from app.services import change_requests as cr_service
 from app.services import fields as field_service
 from app.services import forms as form_service
+from app.services import records as record_service
 from app.services import relations as rel_service
 
 BUILT_IN_FIELDS = [
@@ -27,6 +28,9 @@ BUILT_IN_FIELDS = [
      "description": "Short, unique-ish name of the atom."},
     {"key": "description", "label": "Description", "type": "text", "required": False, "config": {"max_length": 5000},
      "description": "What the atom represents and how it is used."},
+    {"key": "formula", "label": "Formula", "type": "text", "required": False, "config": {"max_length": 2000},
+     "description": "Fill in only when this atom's answer on a form is calculated from other atoms. "
+                    "Refer to them with @, e.g. @weight / (@height * @height)."},
 ]
 
 # A CEL condition on the other atom's answer, e.g. `value == true`. Empty means "is answered".
@@ -48,6 +52,10 @@ RELATION_TYPES = [
      "description": "This atom becomes required when the other atom is present or answered.", "directed": True,
      "cardinality": "many_to_many", "allow_cycles": True, "require_note": True,
      "attributes": [REQUIRED_IF_CONDITION]},
+    {"key": "calculated_from", "label": "Calculated from", "inverse_label": "Used to calculate",
+     "description": "This atom's answer is calculated from the other atom's answer. Set by the atom's formula.",
+     "directed": True, "cardinality": "many_to_many", "allow_cycles": False, "require_note": False,
+     "attributes": [{"key": "ref", "label": "Name in formula", "type": "text", "config": {"max_length": 64}}]},
 ]
 
 DEMO_FIELDS = [
@@ -91,6 +99,11 @@ DEMO_RELATIONS = [
      {"condition": "value == true"}),
 ]
 
+DEMO_RECORDS = [
+    {"first_name": "Ada", "last_name": "Lovelace", "has_middle_name": True, "middle_name": "King", "annual_income": 52000},
+    {"first_name": "Alan", "last_name": "Turing", "has_middle_name": False, "annual_income": 61000},
+    {"first_name": "Grace"},
+]
 
 
 def _demo_form_sections(ids: dict) -> list[dict]:
@@ -116,8 +129,9 @@ def _user(db: Session, username: str, display: str, roles: list[str], password: 
 def seed(db: Session, demo: bool = False, password: str | None = None) -> dict:
     password = password or os.environ.get("ATOM_SEED_PASSWORD", "changeme")
     admin = _user(db, "admin", "Admin", ["admin"], password)
-    editor = _user(db, "editor", "Edith Editor", ["editor"], password)
-    reviewer = _user(db, "reviewer", "Rey Reviewer", ["reviewer", "editor"], password)
+    editor = _user(db, "editor", "Edith Editor", ["atom_editor"], password)
+    reviewer = _user(db, "reviewer", "Rey Reviewer", ["reviewer", "atom_editor"], password)
+    records = _user(db, "records", "Rita Records", ["record_manager"], password)
 
     existing = {f.key for f in db.scalars(select(FieldDefinition))}
     for i, f in enumerate(BUILT_IN_FIELDS):
@@ -150,12 +164,15 @@ def seed(db: Session, demo: bool = False, password: str | None = None) -> dict:
         form = form_service.create_form(db, editor, "person_details", "Person details",
                                         "Basic details about a person.", _demo_form_sections(ids))
         _, _ = cr_service.approve(db, reviewer, form_service.submit_request(db, editor, form, "publish_form", "First version"))
+        # a few saved records for it, one still missing a required answer
+        for answers in DEMO_RECORDS:
+            record_service.create_record(db, records, form, answers)
         # one pending request so the review queue isn't empty
         cr_service.submit(db, editor, "update", atom_id=ids["Annual income"],
                           values={"max_length": 12, "description": "Gross yearly income in USD, before tax."},
                           comment="Clarify that income is before tax.")
     db.commit()
-    return {"admin": admin.username, "editor": editor.username, "reviewer": reviewer.username}
+    return {"admin": admin.username, "editor": editor.username, "reviewer": reviewer.username, "records": records.username}
 
 
 def main() -> None:

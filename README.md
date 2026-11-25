@@ -15,9 +15,27 @@ token-protected API to search, read, create and update them.
   *Includes* groups atoms under their parent, and *Required if* hides an atom until another answer
   meets the link's condition (e.g. `value == true`). Published versions are frozen, pinning each atom's
   revision.
+- **Required or optional.** The form decides, not the atom: each question on a form is marked
+  *Required* or *Optional* (the default) with a switch on its row in the builder. Questions with a
+  *Required if* link are required only when their condition holds, and calculated ones are never asked;
+  both are shown as locked labels. The resolved form gives each question a `requirement`: `required`,
+  `optional`, `required_if` or `calculated`.
+- **Calculated atoms.** An atom with a **Formula** gets its answer on a form from other atoms' answers.
+  Refer to other atoms with `@` and their name in lowercase with underscores, e.g. `@weight / (@height * @height)`;
+  typing `@` in the formula box suggests atoms. When the atom is approved, each `@name` becomes a
+  *Calculated from* link (kept in step with the formula, never edited by hand), so renaming an input
+  atom later doesn't break the formula. On a form the atom is read-only and fills in once every input is
+  answered; publishing is blocked until every input atom is on the form, and loops are refused.
+- **Records.** Saved answers to a published form. Forms are the record types, so there's nothing new
+  to define: pick a form on the *Records* page, click *New record*, fill it in and save. Each save is
+  checked like the form preview (types, rules, *Required if*, calculated answers worked out on save).
+  A bad answer blocks the save; missing required answers don't, and the record shows as *incomplete*
+  until they're filled. Records save directly without review, every save is kept in the record's
+  history, and records can be archived and restored. A record stays on the form version it was saved
+  with until someone moves it to the latest one, which checks it again.
 - **Reviews.** Every create, edit, relation change or deprecation of an atom, and every publish or
   deprecation of a form, is a change request. Anyone with the reviewer role can approve it, except the
-  person who submitted it.
+  person who submitted it. Admins can approve their own requests too.
 - **History.** Every approved change writes a full revision (values and relations).
 
 ## Run it
@@ -28,7 +46,7 @@ With Docker:
 docker compose up --build
 ```
 
-Then open http://localhost:5173 and sign in as `admin`, `editor` or `reviewer` (password `changeme`,
+Then open http://localhost:5173 and sign in as `admin`, `editor`, `reviewer` or `records` (password `changeme`,
 set with `ATOM_SEED_PASSWORD`). Demo fields and atoms are loaded unless `SEED_DEMO=` is empty. The API
 docs are at http://localhost:8000/docs.
 
@@ -72,6 +90,7 @@ Other systems ─/api/v1─┘
 | `atom_revision` | Snapshot of values and relations after each approved change |
 | `form`, `form_section`, `form_item` | A form's draft: sections, the atoms in them, and per-form label, help text and "always required" |
 | `form_version` | A published form, fully resolved: items, input rules, conditions, pinned atom revisions and values |
+| `record`, `record_revision` | Saved answers to a form version (JSONB, GIN-indexed), what's still missing, status; a snapshot after every save |
 | `app_setting` | Admin settings, such as which atom fields decide a form input's type and rules |
 | `app_user`, `api_token` | Users with roles; hashed tokens with scopes |
 
@@ -119,9 +138,10 @@ or with `POST /internal/tokens`. A token can have fewer scopes than its user, ne
 
 | Role | Scopes |
 | --- | --- |
-| viewer | `atoms:read`, `forms:read` |
-| editor | `atoms:read`, `atoms:write` (submit change requests), `forms:read`, `forms:write` (build forms, submit them) |
+| viewer | `atoms:read`, `forms:read`, `records:read` |
+| atom_editor (Atom editor) | `atoms:read`, `atoms:write` (submit change requests), `forms:read`, `forms:write` (build forms, submit them) |
 | reviewer | `atoms:read`, `atoms:approve` (atoms and forms), `forms:read` |
+| record_manager (Record manager) | `atoms:read`, `forms:read`, `records:read`, `records:write` (create, edit, archive and restore records) |
 | admin | all, including `schema:admin` and `users:admin` |
 
 An external identity provider (OIDC/JWT) can be added later in `app/auth.py` without changing routes.
@@ -163,8 +183,71 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
   localhost:8000/api/v1/forms/signup/publish -d '{"notes": "First version"}'
 ```
 
+```bash
+# records: each form's records live under /api/v1/data/<form key>.
+# A new record is saved against the form's latest version; missing required answers are allowed.
+curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  localhost:8000/api/v1/data/person_details -d '{"answers": {"first_name": "Grace"}}'
+# → 201 {"id": "...", "form_version": 1, "complete": false, "missing": ["last_name"], ...}
+
+# search a form's records by text and answers
+curl -H "Authorization: Bearer $TOKEN" \
+  "localhost:8000/api/v1/data/person_details?q=hopper&filter[annual_income][gte]=50000&complete=true"
+
+# change some answers (null clears one), or move to the latest form version with "form_version": "latest"
+curl -X PATCH -H "Authorization: Bearer $TOKEN" -H "If-Match: 1" -H "Content-Type: application/json" \
+  localhost:8000/api/v1/data/person_details/<uuid> -d '{"answers": {"last_name": "Hopper"}}'
+
+# history; archive and restore
+curl -H "Authorization: Bearer $TOKEN" localhost:8000/api/v1/data/person_details/<uuid>/revisions
+curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  localhost:8000/api/v1/data/person_details/<uuid>/archive -d '{}'
+
+# the same routes also exist without the form, for searching across forms: /api/v1/records?q=...
+```
+
 Filter operators: `eq` (default), `ne`, `in` (comma-separated), `gt`, `gte`, `lt`, `lte`,
 `contains`, `exists`. The full reference is at `/docs`.
+
+## Records API
+
+Each form's records live under its key. The same routes also exist as `/api/v1/records/...`
+without the form in the path, and `GET /api/v1/records` searches across all forms.
+
+| Method and path | Does | Scope |
+| --- | --- | --- |
+| `GET /api/v1/data/{form_key}` | Search: `q`, `filter[<question>][<op>]`, `complete`, `status` (active, archived, all), `sort`, `page`, `page_size` | `records:read` |
+| `POST /api/v1/data/{form_key}` | Save a new record: `{"answers": {...}}` | `records:write` |
+| `GET /api/v1/data/{form_key}/{id}` | One record, with `fields` (which questions are visible and required) | `records:read` |
+| `PATCH /api/v1/data/{form_key}/{id}` | Change answers (null clears one); `"form_version": "latest"` moves it to the latest form version | `records:write` |
+| `POST /api/v1/data/{form_key}/{id}/archive`, `/restore` | Archive or restore | `records:write` |
+| `GET /api/v1/data/{form_key}/{id}/revisions` | Every saved revision, newest first | `records:read` |
+
+A record looks like this:
+
+```json
+{
+  "id": "8e280dd4-…",
+  "form": {"id": "…", "key": "person_details", "name": "Person details", "status": "active"},
+  "form_version": 1, "latest_form_version": 1,
+  "title": "Alan Turing",
+  "answers": {"first_name": "Alan", "last_name": "Turing", "has_middle_name": false, "annual_income": 61000},
+  "missing": [], "complete": true,
+  "status": "active", "revision": 1,
+  "created_at": "…", "created_by_name": "Rita Records", "updated_at": "…", "updated_by_name": "Rita Records"
+}
+```
+
+Answers are keyed by the form's question keys (see `GET /api/v1/forms/{form_key}/versions/latest`).
+`GET` sends the revision as `ETag`; send it back as `If-Match` on `PATCH`, archive and restore.
+
+| Status | When |
+| --- | --- |
+| 422 `validation_failed` | A bad answer: wrong type, out of range, unknown question, a calculation that fails. Every problem is listed in `details`. |
+| 409 `stale_revision` | `If-Match` doesn't match the current revision |
+| 409 `record_archived` | Changing an archived record |
+| 409 `form_deprecated`, `form_not_published` | Creating a record for a deprecated form, or one with no published version |
+| 404 | Unknown form, unknown record, or a record that belongs to another form |
 
 ## Settings
 
@@ -181,7 +264,6 @@ All settings are environment variables (see `backend/.env.example`):
 
 ## Not in this prototype
 
-- Forms that group atoms (the tables above leave room for `form` and `form_atom`).
 - Login through the larger system's identity provider.
 - A scheduler for the daily refresh; use cron or the endpoint.
 - Approval for schema changes (admins publish directly).

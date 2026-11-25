@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { api } from '../api'
+import { api, ROLE_LABELS } from '../api'
 import ErrorBox from '../components/ErrorBox'
 
 interface User {
@@ -11,16 +11,16 @@ interface User {
   is_service_account: boolean
   is_active: boolean
 }
-const ROLES = ['viewer', 'editor', 'reviewer', 'admin']
+const ROLES = ['viewer', 'atom_editor', 'reviewer', 'record_manager', 'admin']
 
 export default function Users() {
   const qc = useQueryClient()
   const users = useQuery({ queryKey: ['users'], queryFn: () => api<User[]>('/internal/users') })
-  const [form, setForm] = useState({ username: '', display_name: '', password: '', roles: ['editor'], is_service_account: false })
+  const [form, setForm] = useState({ username: '', display_name: '', password: '', roles: ['atom_editor'], is_service_account: false })
   const create = useMutation({
     mutationFn: () => api('/internal/users', { body: { ...form, password: form.password || undefined } }),
     onSuccess: () => {
-      setForm({ username: '', display_name: '', password: '', roles: ['editor'], is_service_account: false })
+      setForm({ username: '', display_name: '', password: '', roles: ['atom_editor'], is_service_account: false })
       qc.invalidateQueries({ queryKey: ['users'] })
     },
   })
@@ -33,7 +33,7 @@ export default function Users() {
   return (
     <div>
       <div className="page-head"><h1>Users</h1></div>
-      <p className="muted small">Viewers read. Editors submit changes. Reviewers approve other people's changes. Admins manage fields, relation types and users.</p>
+      <p className="muted small">Viewers read atoms, forms and records. Atom editors propose atom changes and build forms. Reviewers approve other people's changes. Record managers create and edit records. Admins do everything, including fields, relation types and users.</p>
       <ErrorBox error={users.error ?? update.error} />
       <div className="card flush">
         <table className="table">
@@ -46,7 +46,7 @@ export default function Users() {
                   <div className="checks inline">
                     {ROLES.map((r) => (
                       <label key={r} className="check">
-                        <input type="checkbox" checked={u.roles.includes(r)} onChange={() => update.mutate({ id: u.id, body: { roles: toggleRole(u.roles, r) } })} /> {r}
+                        <input type="checkbox" checked={u.roles.includes(r)} onChange={() => update.mutate({ id: u.id, body: { roles: toggleRole(u.roles, r) } })} /> {ROLE_LABELS[r] ?? r}
                       </label>
                     ))}
                   </div>
@@ -69,7 +69,7 @@ export default function Users() {
         )}
         <div className="checks inline">
           {ROLES.map((r) => (
-            <label key={r} className="check"><input type="checkbox" checked={form.roles.includes(r)} onChange={() => setForm({ ...form, roles: toggleRole(form.roles, r) })} /> {r}</label>
+            <label key={r} className="check"><input type="checkbox" checked={form.roles.includes(r)} onChange={() => setForm({ ...form, roles: toggleRole(form.roles, r) })} /> {ROLE_LABELS[r] ?? r}</label>
           ))}
         </div>
         <ErrorBox error={create.error} />

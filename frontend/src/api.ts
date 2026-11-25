@@ -250,11 +250,13 @@ export interface ResolvedItem {
   label: string
   help_text: string
   required: boolean
+  requirement: 'required' | 'optional' | 'required_if' | 'calculated'
   input: FormInput
   atom_values: Values
   conditions: FormCondition[]
   parent: string | null
   depends_on: string[]
+  calculation?: { formula: string; inputs: { ref: string; key: string; atom_id: string; atom_name: string | null }[] }
 }
 
 export interface FormDefinition {
@@ -342,7 +344,7 @@ export interface AnswerCheck {
   valid: boolean
   version: number | 'draft'
   answers: Values
-  fields: { key: string; visible: boolean; required: boolean }[]
+  fields: { key: string; visible: boolean; required: boolean; calculated?: boolean; value?: unknown }[]
   errors: FieldError[]
   ignored: string[]
 }
@@ -357,4 +359,48 @@ export interface InputSettings {
   max_field: string | null
   regex_field: string | null
   choices_field: string | null
+  formula_field: string | null
+}
+
+/** The name an atom goes by after @ in formulas, e.g. "Date of birth" -> date_of_birth. */
+export function refName(name: unknown): string {
+  let s = String(name ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
+  if (s && !/^[a-z]/.test(s)) s = 'a_' + s
+  return s
+}
+
+// --- Records ------------------------------------------------------------------------------
+
+export interface RecordItem {
+  id: string
+  form: { id: string; key: string; name: string; status: 'active' | 'deprecated' }
+  form_version: number
+  latest_form_version: number | null
+  title: string
+  answers: Values
+  missing: string[]
+  complete: boolean
+  status: 'active' | 'archived'
+  revision: number
+  created_at: string
+  updated_at: string
+  created_by_name: string | null
+  updated_by_name: string | null
+  fields?: AnswerCheck['fields']
+  dropped?: string[]
+}
+
+export interface RecordRevision {
+  revision: number
+  form_version: number
+  answers: Values
+  complete: boolean
+  status: 'active' | 'archived'
+  summary: string
+  changed_by_name: string | null
+  changed_at: string
+}
+
+export const ROLE_LABELS: Record<string, string> = {
+  viewer: 'Viewer', atom_editor: 'Atom editor', reviewer: 'Reviewer', record_manager: 'Record manager', admin: 'Admin',
 }

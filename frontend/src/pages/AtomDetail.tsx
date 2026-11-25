@@ -13,7 +13,8 @@ import { formatDate, useRelationTypes, useSchema } from '../hooks'
 type Tab = 'details' | 'relations' | 'graph' | 'history' | 'requests'
 
 function AddRelation({ atom, types, onDone }: { atom: Atom; types: RelationType[]; onDone: (cr: ChangeRequest) => void }) {
-  const active = types.filter((t) => t.status === 'active')
+  // Calculated from links come from the atom's formula, so they aren't added by hand.
+  const active = types.filter((t) => t.status === 'active' && t.key !== 'calculated_from')
   const [choice, setChoice] = useState(active[0] ? `${active[0].key}:out` : '')
   const [target, setTarget] = useState<Atom | null>(null)
   const [note, setNote] = useState('')
@@ -231,7 +232,9 @@ export default function AtomDetail() {
                       ))}
                     </td>
                     <td className="right">
-                      {can('atoms:write') && a.status === 'active' && (
+                      {r.type === 'calculated_from' ? (
+                        <span className="muted small">From the formula</span>
+                      ) : can('atoms:write') && a.status === 'active' && (
                         <button className="link danger" onClick={() => removeRelation.mutate(r)}>Remove</button>
                       )}
                     </td>

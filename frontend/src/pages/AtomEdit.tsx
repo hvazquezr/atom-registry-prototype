@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { api, atomName, type Atom, type ChangeRequest, type FieldError, type Values } from '../api'
+import { api, atomName, type Atom, type ChangeRequest, type FieldError, type InputSettings, type Values } from '../api'
 import ErrorBox, { fieldErrorMap } from '../components/ErrorBox'
 import FieldInput from '../components/FieldInput'
+import FormulaInput from '../components/FormulaInput'
 import ValueView from '../components/ValueView'
 import { editableFields, useSchema } from '../hooks'
 
@@ -27,6 +28,8 @@ export default function AtomEdit() {
   const [values, setValues] = useState<Values>({})
   const [comment, setComment] = useState('')
   const [touched, setTouched] = useState<Set<string>>(new Set())
+  const settings = useQuery({ queryKey: ['form-input-settings'], queryFn: () => api<InputSettings>('/api/v1/form-input-settings') })
+  const formulaKey = settings.data?.formula_field
 
   useEffect(() => {
     if (atom.data) setValues(atom.data.values)
@@ -53,7 +56,8 @@ export default function AtomEdit() {
   const debounced = useDebounced(payload, 350)
   const preview = useQuery({
     queryKey: ['preview', id, debounced],
-    queryFn: () => api<{ valid: boolean; values: Values | null; errors: FieldError[] }>('/api/v1/atoms/preview', { body: { values: debounced, atom_id: id } }),
+    queryFn: () => api<{ valid: boolean; values: Values | null; errors: FieldError[]; formula_inputs?: { ref: string; atom_id: string; atom_name: string | null }[] }>(
+      '/api/v1/atoms/preview', { body: { values: debounced, atom_id: id } }),
     enabled: !!schema.data && (!id || !!atom.data),
   })
   const previewErrors: Record<string, string> = {}
@@ -95,18 +99,20 @@ export default function AtomEdit() {
       </div>
       <div className="two-col">
         <div className="card">
-          {inputs.map((f) => (
-            <FieldInput
-              key={f.key}
-              field={f}
-              value={values[f.key]}
-              error={submitErrors[f.key] ?? previewErrors[f.key]}
-              onChange={(v) => {
-                setValues({ ...values, [f.key]: v })
-                setTouched(new Set(touched).add(f.key))
-              }}
-            />
-          ))}
+          {inputs.map((f) => {
+            const props = {
+              field: f,
+              value: values[f.key],
+              error: submitErrors[f.key] ?? previewErrors[f.key],
+              onChange: (v: unknown) => {
+                setValues((vs) => ({ ...vs, [f.key]: v }))
+                setTouched((t) => new Set(t).add(f.key))
+              },
+            }
+            return f.key === formulaKey && f.type === 'text'
+              ? <FormulaInput key={f.key} {...props} atomId={id} inputs={preview.data?.formula_inputs} />
+              : <FieldInput key={f.key} {...props} />
+          })}
           <div className="form-field">
             <label>Comment for the reviewer</label>
             <textarea rows={2} value={comment} onChange={(e) => setComment(e.target.value)} placeholder="What changed and why" />

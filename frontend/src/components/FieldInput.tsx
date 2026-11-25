@@ -6,6 +6,8 @@ interface Props {
   value: unknown
   onChange: (v: unknown) => void
   error?: string
+  /** Label questions that aren't required as "optional" (used on forms). */
+  markOptional?: boolean
 }
 
 function hint(field: Field): string {
@@ -99,7 +101,7 @@ function ListInput({ field, value, onChange }: Props) {
 }
 
 export default function FieldInput(props: Props) {
-  const { field, value, onChange, error } = props
+  const { field, value, onChange, error, markOptional } = props
   const c = field.config
   let input
   if (field.type === 'options' && c.multiple) {
@@ -145,6 +147,7 @@ export default function FieldInput(props: Props) {
       <label>
         {field.label}
         {field.required && <span className="req"> *</span>}
+        {markOptional && !field.required && <span className="opt">optional</span>}
       </label>
       {field.description && <div className="muted small">{field.description}</div>}
       {input}

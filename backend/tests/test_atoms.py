@@ -43,6 +43,14 @@ def test_reviewers_cannot_approve_their_own_requests(admin, reviewer):
     assert reviewer.get("/internal/review-queue").json()[0]["can_review"] is False
 
 
+def test_admins_can_approve_their_own_requests(admin):
+    setup_fields(admin)
+    r = admin.post("/api/v1/atoms", json={"values": {"name": "Admin's", "code": "ABC-002"}})
+    assert admin.get("/internal/review-queue").json()[0]["can_review"] is True
+    a = admin.post(f"/internal/change-requests/{r.json()['id']}/approve", json={})
+    assert a.status_code == 200, a.text
+
+
 def test_update_reject_and_stale_requests(admin, editor, reviewer, make_atom):
     setup_fields(admin)
     atom = make_atom({"name": "Thing", "code": "ABC-001", "size": 5})
