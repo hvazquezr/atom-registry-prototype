@@ -206,7 +206,7 @@ def review_queue(db: Session = Depends(get_db), p: Principal = Depends(approver)
     rows = cr_service.list_requests(db, status="pending")
     out = [enrich_change_request(db, cr) for cr in rows]
     for item in out:
-        item["can_review"] = item["submitted_by"] != str(p.id) or cr_service.get_settings().allow_self_approval
+        item["can_review"] = item["submitted_by"] != str(p.id) or cr_service.may_review_own(p.user)
     return out
 
 

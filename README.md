@@ -23,7 +23,7 @@ token-protected API to search, read, create and update them.
   answered; publishing is blocked until every input atom is on the form, and loops are refused.
 - **Reviews.** Every create, edit, relation change or deprecation of an atom, and every publish or
   deprecation of a form, is a change request. Anyone with the reviewer role can approve it, except the
-  person who submitted it.
+  person who submitted it. Admins can approve their own requests too.
 - **History.** Every approved change writes a full revision (values and relations).
 
 ## Run it

@@ -195,10 +195,15 @@ def withdraw(db: Session, user: User, cr: ChangeRequest) -> ChangeRequest:
     return cr
 
 
+def may_review_own(user: User) -> bool:
+    """Admins may approve or reject their own requests; others only when the setting allows it."""
+    return "admin" in (user.roles or []) or get_settings().allow_self_approval
+
+
 def _check_reviewer(user: User, cr: ChangeRequest) -> None:
     if cr.status != "pending":
         raise conflict("not_pending", f"This change request is already {cr.status}.")
-    if cr.submitted_by == user.id and not get_settings().allow_self_approval:
+    if cr.submitted_by == user.id and not may_review_own(user):
         raise AppError(403, "self_review", "You can't review your own change request.")
 
 
