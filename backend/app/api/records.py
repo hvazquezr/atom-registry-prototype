@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import re
 import uuid
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, Query, Request, Response
+from fastapi import APIRouter, Depends, Header, Path, Query, Request, Response
 from sqlalchemy.orm import Session
 
 from app.auth import Principal, require
@@ -16,6 +17,7 @@ from app.services import forms as form_service
 from app.services import records as record_service
 
 router = APIRouter(prefix="/api/v1", tags=["records"])
+data_router = APIRouter(prefix="/api/v1", tags=["data"])
 read = require("records:read")
 write = require("records:write")
 
@@ -56,7 +58,7 @@ def _filters(request: Request) -> list[tuple[str, str, str]]:
     "/records",
     summary="Search records across forms",
     description=(
-        "Every route here also exists under /data/{form key}, scoped to one form. Narrow to one form with `form=<key or id>`. `q` matches words in the answers. With a form, "
+        "Across all forms; for one form, GET /data/{form_key} does the same. Narrow to one form with `form=<key or id>`. `q` matches words in the answers. With a form, "
         "filter answers as `filter[<question>][<op>]=<value>` (ops: eq, ne, in, gt, gte, lt, lte, contains, "
         "exists) and sort by a question key. `complete=false` lists records with required answers missing. "
         "Other sorts: created_at, updated_at, revision (prefix - for newest first)."
@@ -96,7 +98,7 @@ def create_record(body: RecordCreate, response: Response, db: Session = Depends(
     return _body(db, rec, response)
 
 
-@router.get("/records/{record_id}", summary="A record with its answers and which questions are shown")
+@router.get("/records/{record_id}", description="Same as GET /data/{form_key}/{record_id}, without the form in the path.", summary="A record with its answers and which questions are shown")
 def get_record(record_id: uuid.UUID, response: Response, db: Session = Depends(get_db), _: Principal = Depends(read)):
     return _body(db, record_service.get_record(db, record_id), response)
 
@@ -142,25 +144,35 @@ def record_revisions(record_id: uuid.UUID, db: Session = Depends(get_db), _: Pri
 
 # --- The same, scoped to one form: /api/v1/data/{form key} ------------------------------
 
+FormKey = Annotated[str, Path(description="The form's key, e.g. person_details (its id works too).")]
+SAVE_RULES = (
+    "Each save is checked against the record's form version: types and rules, Required if, and calculated "
+    "answers, which are worked out here (anything sent for them is ignored). A bad answer is refused with 422 "
+    "and every problem listed. Missing required answers are allowed: they're listed under `missing` and the "
+    "record has `complete: false` until they're filled. Answers to questions that are hidden are dropped."
+)
 
-def _in_form(db: Session, form_id: str, record_id: uuid.UUID):
-    form = form_service.get_form(db, form_id)
+
+def _in_form(db: Session, form_key: str, record_id: uuid.UUID):
+    form = form_service.get_form(db, form_key)
     rec = record_service.get_record(db, record_id)
     if rec.form_id != form.id:
         raise not_found("Record")
     return rec
 
 
-@router.get(
-    "/data/{form_id}",
-    summary="Search one form's records",
+@data_router.get(
+    "/data/{form_key}",
+    summary="Search a form's records",
     description=(
-        "`form_id` is the form's key or id. Same parameters as GET /records: `q`, "
-        "`filter[<question>][<op>]=<value>`, `complete`, `status`, `sort` (a question key works too), paging."
+        "`q` matches words anywhere in the answers. Filter answers with `filter[<question>][<op>]=<value>` "
+        "(or `filter[<question>]=<value>` for eq). Ops: eq, ne, in (comma-separated), gt, gte, lt, lte, "
+        "contains (text), exists. `complete=false` lists records with required answers missing. Sort with "
+        "`sort=<question key>`, created_at, updated_at or revision; prefix - for descending. Needs `records:read`."
     ),
 )
 def search_form_records(
-    form_id: str,
+    form_key: FormKey,
     request: Request,
     q: str | None = None,
     status: str = Query("active", description="active, archived or all"),
@@ -171,45 +183,70 @@ def search_form_records(
     db: Session = Depends(get_db),
     _: Principal = Depends(read),
 ):
-    return record_service.search(db, form=form_service.get_form(db, form_id), q=q, status=status, complete=complete,
+    return record_service.search(db, form=form_service.get_form(db, form_key), q=q, status=status, complete=complete,
                                  filters=_filters(request), sort=sort, page=page, page_size=page_size)
 
 
-@router.post("/data/{form_id}", status_code=201, summary="Save a new record for this form")
-def create_form_record(form_id: str, body: RecordAnswers, response: Response, db: Session = Depends(get_db),
+@data_router.post(
+    "/data/{form_key}",
+    status_code=201,
+    summary="Save a new record",
+    description="Saved against the form's latest published version. " + SAVE_RULES + " Needs `records:write`.",
+)
+def create_form_record(form_key: FormKey, body: RecordAnswers, response: Response, db: Session = Depends(get_db),
                        p: Principal = Depends(write)):
-    body = create_record(RecordCreate(form=form_id, answers=body.answers), response, db, p)
-    response.headers["Location"] = f"/api/v1/data/{body['form']['key']}/{body['id']}"
-    return body
+    out = create_record(RecordCreate(form=form_key, answers=body.answers), response, db, p)
+    response.headers["Location"] = f"/api/v1/data/{out['form']['key']}/{out['id']}"
+    return out
 
 
-@router.get("/data/{form_id}/{record_id}", summary="One of this form's records")
-def get_form_record(form_id: str, record_id: uuid.UUID, response: Response, db: Session = Depends(get_db),
+@data_router.get(
+    "/data/{form_key}/{record_id}",
+    summary="Get a record",
+    description=(
+        "The record's answers (calculated ones included), what's still `missing`, and `fields`: which questions "
+        "are visible and required for these answers. The ETag header is the revision; send it back as If-Match "
+        "when you change the record. 404 if the record belongs to another form. Needs `records:read`."
+    ),
+)
+def get_form_record(form_key: FormKey, record_id: uuid.UUID, response: Response, db: Session = Depends(get_db),
                     _: Principal = Depends(read)):
-    return _body(db, _in_form(db, form_id, record_id), response)
+    return _body(db, _in_form(db, form_key, record_id), response)
 
 
-@router.patch("/data/{form_id}/{record_id}", summary="Change answers of one of this form's records")
-def update_form_record(form_id: str, record_id: uuid.UUID, body: RecordPatch, response: Response,
+@data_router.patch(
+    "/data/{form_key}/{record_id}",
+    summary="Change a record",
+    description=(
+        "Send only the answers that change; null clears one. Send `form_version: \"latest\"` to move the "
+        "record to the form's latest version; answers to questions that version doesn't have are dropped and "
+        "listed under `dropped`. " + SAVE_RULES + " A stale If-Match is refused with 409. Archived records "
+        "can't be changed. Needs `records:write`."
+    ),
+)
+def update_form_record(form_key: FormKey, record_id: uuid.UUID, body: RecordPatch, response: Response,
                        if_match: str | None = Header(None), db: Session = Depends(get_db), p: Principal = Depends(write)):
-    _in_form(db, form_id, record_id)
+    _in_form(db, form_key, record_id)
     return update_record(record_id, body, response, if_match, db, p)
 
 
-@router.post("/data/{form_id}/{record_id}/archive", summary="Archive one of this form's records")
-def archive_form_record(form_id: str, record_id: uuid.UUID, body: RecordStatusChange, response: Response,
+@data_router.post("/data/{form_key}/{record_id}/archive", summary="Archive a record",
+             description="Hides it from searches (unless status=archived or all) and stops edits. It can be restored. Needs `records:write`.")
+def archive_form_record(form_key: FormKey, record_id: uuid.UUID, body: RecordStatusChange, response: Response,
                         if_match: str | None = Header(None), db: Session = Depends(get_db), p: Principal = Depends(write)):
-    _in_form(db, form_id, record_id)
+    _in_form(db, form_key, record_id)
     return archive_record(record_id, body, response, if_match, db, p)
 
 
-@router.post("/data/{form_id}/{record_id}/restore", summary="Restore one of this form's records")
-def restore_form_record(form_id: str, record_id: uuid.UUID, body: RecordStatusChange, response: Response,
+@data_router.post("/data/{form_key}/{record_id}/restore", summary="Restore an archived record",
+             description="Needs `records:write`.")
+def restore_form_record(form_key: FormKey, record_id: uuid.UUID, body: RecordStatusChange, response: Response,
                         if_match: str | None = Header(None), db: Session = Depends(get_db), p: Principal = Depends(write)):
-    _in_form(db, form_id, record_id)
+    _in_form(db, form_key, record_id)
     return restore_record(record_id, body, response, if_match, db, p)
 
 
-@router.get("/data/{form_id}/{record_id}/revisions", summary="History of one of this form's records")
-def form_record_revisions(form_id: str, record_id: uuid.UUID, db: Session = Depends(get_db), _: Principal = Depends(read)):
-    return record_service.revisions(db, _in_form(db, form_id, record_id))
+@data_router.get("/data/{form_key}/{record_id}/revisions", summary="A record's history",
+            description="Every saved revision, newest first: answers, form version, complete, a summary of what changed, who and when. Needs `records:read`.")
+def form_record_revisions(form_key: FormKey, record_id: uuid.UUID, db: Session = Depends(get_db), _: Principal = Depends(read)):
+    return record_service.revisions(db, _in_form(db, form_key, record_id))

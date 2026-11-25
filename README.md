@@ -204,6 +204,46 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
 Filter operators: `eq` (default), `ne`, `in` (comma-separated), `gt`, `gte`, `lt`, `lte`,
 `contains`, `exists`. The full reference is at `/docs`.
 
+## Records API
+
+Each form's records live under its key. The same routes also exist as `/api/v1/records/...`
+without the form in the path, and `GET /api/v1/records` searches across all forms.
+
+| Method and path | Does | Scope |
+| --- | --- | --- |
+| `GET /api/v1/data/{form_key}` | Search: `q`, `filter[<question>][<op>]`, `complete`, `status` (active, archived, all), `sort`, `page`, `page_size` | `records:read` |
+| `POST /api/v1/data/{form_key}` | Save a new record: `{"answers": {...}}` | `records:write` |
+| `GET /api/v1/data/{form_key}/{id}` | One record, with `fields` (which questions are visible and required) | `records:read` |
+| `PATCH /api/v1/data/{form_key}/{id}` | Change answers (null clears one); `"form_version": "latest"` moves it to the latest form version | `records:write` |
+| `POST /api/v1/data/{form_key}/{id}/archive`, `/restore` | Archive or restore | `records:write` |
+| `GET /api/v1/data/{form_key}/{id}/revisions` | Every saved revision, newest first | `records:read` |
+
+A record looks like this:
+
+```json
+{
+  "id": "8e280dd4-…",
+  "form": {"id": "…", "key": "person_details", "name": "Person details", "status": "active"},
+  "form_version": 1, "latest_form_version": 1,
+  "title": "Alan Turing",
+  "answers": {"first_name": "Alan", "last_name": "Turing", "has_middle_name": false, "annual_income": 61000},
+  "missing": [], "complete": true,
+  "status": "active", "revision": 1,
+  "created_at": "…", "created_by_name": "Rita Records", "updated_at": "…", "updated_by_name": "Rita Records"
+}
+```
+
+Answers are keyed by the form's question keys (see `GET /api/v1/forms/{form_key}/versions/latest`).
+`GET` sends the revision as `ETag`; send it back as `If-Match` on `PATCH`, archive and restore.
+
+| Status | When |
+| --- | --- |
+| 422 `validation_failed` | A bad answer: wrong type, out of range, unknown question, a calculation that fails. Every problem is listed in `details`. |
+| 409 `stale_revision` | `If-Match` doesn't match the current revision |
+| 409 `record_archived` | Changing an archived record |
+| 409 `form_deprecated`, `form_not_published` | Creating a record for a deprecated form, or one with no published version |
+| 404 | Unknown form, unknown record, or a record that belongs to another form |
+
 ## Settings
 
 All settings are environment variables (see `backend/.env.example`):
