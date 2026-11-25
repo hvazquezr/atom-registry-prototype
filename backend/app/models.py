@@ -200,7 +200,10 @@ class ChangeRequest(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
     atom_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("atom.id", ondelete="CASCADE"), index=True)
-    kind: Mapped[str] = mapped_column(String(20), nullable=False)  # create|update|deprecate|restore
+    # Set instead of atom_id for form requests (publish_form, deprecate_form, restore_form).
+    form_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("form.id", ondelete="CASCADE"), index=True)
+    # create|update|deprecate|restore for atoms; publish_form|deprecate_form|restore_form for forms
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
     proposed_values: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     # {"add": [{"type": key, "target_atom_id": id, "direction": "out"|"in", "note": "", "attributes": {}}],
     #  "remove": [relation_id, ...]}
@@ -218,3 +221,98 @@ class ChangeRequest(Base):
     reviewed_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.id"))
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     review_comment: Mapped[str] = mapped_column(Text, nullable=False, default="")
+
+
+# --- Forms ------------------------------------------------------------------------------
+#
+# A form groups atoms into ordered sections. The draft (form_section + form_item) is edited
+# freely; publishing goes through a change request and, once approved, freezes the whole
+# resolved definition (atom revisions, input rules, Required if conditions) into form_version.
+
+
+class Form(TimestampMixin, Base):
+    __tablename__ = "form"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    key: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    # Goes up by one on every draft save, so publish requests can tell when the draft moved on.
+    draft_revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    latest_version: Mapped[int | None] = mapped_column(Integer)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.id"))
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.id"))
+
+    sections: Mapped[list["FormSection"]] = relationship(
+        order_by="FormSection.position", cascade="all, delete-orphan", back_populates="form"
+    )
+
+
+class FormSection(Base):
+    __tablename__ = "form_section"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    form_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("form.id", ondelete="CASCADE"), index=True)
+    title: Mapped[str] = mapped_column(String(200), nullable=False, default="")
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    form: Mapped[Form] = relationship(back_populates="sections")
+    items: Mapped[list["FormItem"]] = relationship(
+        order_by="FormItem.position", cascade="all, delete-orphan", back_populates="section"
+    )
+
+
+class FormItem(Base):
+    __tablename__ = "form_item"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    form_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("form.id", ondelete="CASCADE"), index=True)
+    section_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("form_section.id", ondelete="CASCADE"))
+    atom_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("atom.id"), index=True)
+    # The answer key clients use, unique within the form.
+    key: Mapped[str] = mapped_column(String(64), nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Overrides. Empty label/help_text means "use the atom's name/description".
+    label: Mapped[str] = mapped_column(String(200), nullable=False, default="")
+    help_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    section: Mapped[FormSection] = relationship(back_populates="items")
+
+    __table_args__ = (
+        UniqueConstraint("form_id", "atom_id"),
+        UniqueConstraint("form_id", "key"),
+    )
+
+
+class FormVersion(Base):
+    __tablename__ = "form_version"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    form_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("form.id", ondelete="CASCADE"), index=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    # The resolved form: sections, items, pinned atom revisions and values, input rules, conditions.
+    definition: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    change_request_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("change_request.id"))
+    published_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.id"))
+    approved_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.id"))
+    published_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (UniqueConstraint("form_id", "version"),)
+
+
+class AppSetting(Base):
+    """Small key/value settings edited by admins (e.g. how atom fields map to form inputs)."""
+
+    __tablename__ = "app_setting"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )

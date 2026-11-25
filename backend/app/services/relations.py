@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.errors import ValidationFailed, bad_request, conflict, field_error, not_found
 from app.models import Atom, AtomRelation, RelationType
+from app.services import expressions
 from app.services.fields import KEY_PATTERN, check_config
 from app.services.validation import FIELD_TYPES, validate_atom_values
 
@@ -108,12 +109,36 @@ def save_relation_type(db: Session, data: dict, rt_id: uuid.UUID | None = None) 
 # --- Links ------------------------------------------------------------------------------
 
 
+# Variables a link condition (an attribute marked "expression": true) may use.
+CONDITION_VARIABLES = {"value"}
+
+
+def check_condition(source: str) -> str | None:
+    """Return an error message if `source` is not a usable link condition."""
+    try:
+        parsed = expressions.parse(source)
+    except expressions.ExpressionError as exc:
+        return exc.message
+    unknown = sorted(parsed.variables - CONDITION_VARIABLES)
+    if unknown:
+        return f"Conditions can only use `value` (the other atom's answer), not: {', '.join(unknown)}."
+    return None
+
+
 def validate_attributes(rt: RelationType, attributes: dict | None) -> dict:
     defs = [dict(d, calculated=False) for d in (rt.attributes or [])]
     try:
-        return validate_atom_values(defs, attributes or {})
+        clean = validate_atom_values(defs, attributes or {})
     except ValidationFailed as exc:
         raise ValidationFailed([dict(e, field=f"relation.{rt.key}.{e['field']}") for e in exc.errors]) from exc
+    errors = []
+    for d in defs:
+        if d.get("expression") and clean.get(d["key"]):
+            if msg := check_condition(clean[d["key"]]):
+                errors.append(field_error(f"relation.{rt.key}.{d['key']}", "invalid_condition", msg))
+    if errors:
+        raise ValidationFailed(errors)
+    return clean
 
 
 def normalize_pair(rt: RelationType, source: uuid.UUID, target: uuid.UUID) -> tuple[uuid.UUID, uuid.UUID]:

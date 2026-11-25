@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { api, atomName, type Atom, type ChangeRequest, type Relation, type RelationType, type Revision } from '../api'
+import { api, atomName, type Atom, type ChangeRequest, type FormSummary, type Page, type Relation, type RelationType, type Revision, type Values } from '../api'
 import { useAuth } from '../auth'
 import AtomPicker from '../components/AtomPicker'
+import FieldInput from '../components/FieldInput'
 import ErrorBox from '../components/ErrorBox'
 import Graph from '../components/Graph'
 import ValueView from '../components/ValueView'
@@ -17,13 +18,14 @@ function AddRelation({ atom, types, onDone }: { atom: Atom; types: RelationType[
   const [target, setTarget] = useState<Atom | null>(null)
   const [note, setNote] = useState('')
   const [comment, setComment] = useState('')
+  const [attributes, setAttributes] = useState<Values>({})
   const [typeKey, direction] = choice.split(':') as [string, 'out' | 'in']
   const type = active.find((t) => t.key === typeKey)
   const submit = useMutation({
     mutationFn: () =>
       api<ChangeRequest>(`/api/v1/atoms/${atom.id}`, {
         method: 'PATCH',
-        body: { relations: { add: [{ type: typeKey, target_atom_id: target!.id, direction, note }] }, comment, base_revision: atom.revision },
+        body: { relations: { add: [{ type: typeKey, target_atom_id: target!.id, direction, note, attributes }] }, comment, base_revision: atom.revision },
       }),
     onSuccess: onDone,
   })
@@ -32,7 +34,7 @@ function AddRelation({ atom, types, onDone }: { atom: Atom; types: RelationType[
       <h3>Add a relation</h3>
       <div className="relation-sentence">
         <strong>{atomName(atom.values)}</strong>
-        <select value={choice} onChange={(e) => setChoice(e.target.value)}>
+        <select value={choice} onChange={(e) => (setChoice(e.target.value), setAttributes({}))}>
           {active.map((t) => [
             <option key={`${t.key}:out`} value={`${t.key}:out`}>{t.label.toLowerCase()}</option>,
             t.directed && t.inverse_label ? (
@@ -54,6 +56,16 @@ function AddRelation({ atom, types, onDone }: { atom: Atom; types: RelationType[
         <label>Note{type?.require_note && <span className="req"> *</span>}</label>
         <textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Why are these atoms related?" />
       </div>
+      {(type?.attributes ?? []).map((f) => (
+        <FieldInput key={f.key} field={{ ...f, expression: null, description: f.description ?? '', calculated: false, config: f.config ?? {} }}
+          value={attributes[f.key]} onChange={(v) => setAttributes((a) => ({ ...a, [f.key]: v }))} />
+      ))}
+      {type?.key === 'required_if' && (
+        <div className="muted small">
+          The condition is checked against the other atom's answer on a form, for example <code>value == true</code> or{' '}
+          <code>value &gt; 18</code>. In “{atomName(atom.values)} required if X”, X is the other atom.
+        </div>
+      )}
       <div className="form-field">
         <label>Comment for the reviewer</label>
         <input value={comment} onChange={(e) => setComment(e.target.value)} />
@@ -79,6 +91,11 @@ export default function AtomDetail() {
   const types = useRelationTypes()
 
   const atom = useQuery({ queryKey: ['atom', id], queryFn: () => api<Atom>(`/api/v1/atoms/${id}`) })
+  const usedIn = useQuery({
+    queryKey: ['forms', 'atom', id],
+    queryFn: () => api<Page<FormSummary>>(`/api/v1/forms?atom_id=${id}&status=all`),
+    enabled: can('forms:read'),
+  })
   const relations = useQuery({ queryKey: ['relations', id], queryFn: () => api<Relation[]>(`/api/v1/atoms/${id}/relations`) })
   const history = useQuery({ queryKey: ['revisions', id], queryFn: () => api<Revision[]>(`/api/v1/atoms/${id}/revisions`), enabled: tab === 'history' })
   const requests = useQuery({ queryKey: ['atom-requests', id], queryFn: () => api<ChangeRequest[]>(`/api/v1/change-requests?atom_id=${id}`), enabled: tab === 'requests' })
@@ -171,6 +188,16 @@ export default function AtomDetail() {
                 <dd><ValueView field={f} value={a.values[f.key]} /></dd>
               </div>
             ))}
+            {(usedIn.data?.items.length ?? 0) > 0 && (
+              <div className="value-row">
+                <dt>Used in forms</dt>
+                <dd>
+                  {usedIn.data!.items.map((f, i) => (
+                    <span key={f.id}>{i > 0 && ', '}<Link to={`/forms/${f.id}`}>{f.name}</Link></span>
+                  ))}
+                </dd>
+              </div>
+            )}
             {legacy.map((k) => (
               <div key={k} className="value-row">
                 <dt>{k} <span className="pill gray">deprecated field</span></dt>
@@ -197,7 +224,12 @@ export default function AtomDetail() {
                   <tr key={r.id}>
                     <td className="nowrap">{r.label}</td>
                     <td><Link to={`/atoms/${r.other_atom_id}`}>{r.other_atom_name ?? r.other_atom_id}</Link></td>
-                    <td className="muted">{r.note}</td>
+                    <td className="muted">
+                      {r.note}
+                      {Object.entries(r.attributes ?? {}).map(([k, v]) => (
+                        <div key={k} className="small"><span className="muted">{k}:</span> <code>{String(v)}</code></div>
+                      ))}
+                    </td>
                     <td className="right">
                       {can('atoms:write') && a.status === 'active' && (
                         <button className="link danger" onClick={() => removeRelation.mutate(r)}>Remove</button>

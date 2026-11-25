@@ -214,7 +214,8 @@ def review_queue(db: Session = Depends(get_db), p: Principal = Depends(approver)
 def approve(cr_id: uuid.UUID, body: Review, db: Session = Depends(get_db), p: Principal = Depends(approver)):
     cr, atom = cr_service.approve(db, p.user, cr_service.get(db, cr_id), body.comment)
     db.commit()
-    return {"change_request": enrich_change_request(db, cr), "atom": atom_service.serialize(atom, atom_service.SchemaCache(db))}
+    return {"change_request": enrich_change_request(db, cr),
+            "atom": atom_service.serialize(atom, atom_service.SchemaCache(db)) if atom else None}
 
 
 @router.post("/change-requests/{cr_id}/reject")

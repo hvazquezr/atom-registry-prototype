@@ -21,7 +21,8 @@ KINDS = ("create", "update", "deprecate", "restore")
 
 def to_dict(cr: ChangeRequest, names: dict | None = None) -> dict:
     return {
-        "id": str(cr.id), "atom_id": str(cr.atom_id) if cr.atom_id else None, "kind": cr.kind,
+        "id": str(cr.id), "atom_id": str(cr.atom_id) if cr.atom_id else None,
+        "form_id": str(cr.form_id) if cr.form_id else None, "kind": cr.kind,
         "proposed_values": cr.proposed_values or {}, "proposed_relations": cr.proposed_relations or {},
         "base_revision": cr.base_revision, "comment": cr.comment, "status": cr.status,
         "submitted_by": str(cr.submitted_by) if cr.submitted_by else None,
@@ -156,6 +157,11 @@ def submit(db: Session, user: User, kind: str, atom_id: uuid.UUID | None = None,
 
 def revise(db: Session, user: User, cr: ChangeRequest, values: dict | None, relations: dict | None, comment: str | None) -> ChangeRequest:
     """The submitter edits a pending request. This also moves it onto the atom's current revision."""
+    if cr.form_id:
+        from app.services import forms as form_service
+
+        notes = (values or {}).get("notes") if values is not None else None
+        return form_service.revise_request(db, user, cr, notes, comment)
     if cr.status != "pending":
         raise conflict("not_pending", "Only pending change requests can be edited.")
     if cr.submitted_by != user.id:
@@ -200,9 +206,26 @@ def reject(db: Session, user: User, cr: ChangeRequest, comment: str = "") -> Cha
     return cr
 
 
-def approve(db: Session, user: User, cr: ChangeRequest, comment: str = "") -> tuple[ChangeRequest, Atom]:
-    """Validate again against the current schema and atom, then apply everything in one transaction."""
+def _mark_approved(user: User, cr: ChangeRequest, comment: str) -> None:
+    cr.status = "approved"
+    cr.reviewed_by = user.id
+    cr.reviewed_at = dt.datetime.now(dt.UTC)
+    cr.review_comment = comment or ""
+
+
+def approve(db: Session, user: User, cr: ChangeRequest, comment: str = "") -> tuple[ChangeRequest, Atom | None]:
+    """Validate again against the current schema and atom, then apply everything in one transaction.
+
+    Form requests are applied by the forms service and return no atom.
+    """
     _check_reviewer(user, cr)
+    if cr.form_id:
+        from app.services import forms as form_service
+
+        form_service.apply_request(db, user, cr)
+        _mark_approved(user, cr, comment)
+        db.flush()
+        return cr, None
     schema = require_schema(db)
     atom = None
     if cr.atom_id:
@@ -271,8 +294,10 @@ def approve(db: Session, user: User, cr: ChangeRequest, comment: str = "") -> tu
 
 
 def list_requests(db: Session, status: str | None = None, atom_id: uuid.UUID | None = None,
-                  submitted_by: uuid.UUID | None = None, limit: int = 100) -> list[ChangeRequest]:
+                  submitted_by: uuid.UUID | None = None, limit: int = 100, form_id: uuid.UUID | None = None) -> list[ChangeRequest]:
     q = select(ChangeRequest)
+    if form_id:
+        q = q.where(ChangeRequest.form_id == form_id)
     if status and status != "all":
         q = q.where(ChangeRequest.status == status)
     if atom_id:

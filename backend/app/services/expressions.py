@@ -133,6 +133,8 @@ def to_cel(value, field_type: str, config: dict | None = None):
         return None
     if field_type == "text":
         return celtypes.StringType(value)
+    if field_type == "boolean":
+        return celtypes.BoolType(bool(value))
     if field_type == "number":
         if isinstance(value, int) and not isinstance(value, bool):
             return celtypes.IntType(value)

@@ -6,6 +6,8 @@ import AtomDetail from './pages/AtomDetail'
 import AtomEdit from './pages/AtomEdit'
 import AtomList from './pages/AtomList'
 import ChangeRequestPage from './pages/ChangeRequestPage'
+import FormBuilder from './pages/FormBuilder'
+import FormList from './pages/FormList'
 import Login from './pages/Login'
 import MyRequests from './pages/MyRequests'
 import RelationTypes from './pages/RelationTypes'
@@ -39,6 +41,7 @@ export default function App() {
           <div className="nav-group">Registry</div>
           <NavLink to="/atoms" end>Atoms</NavLink>
           {can('atoms:write') && <NavLink to="/atoms/new">New atom</NavLink>}
+          {can('forms:read') && <NavLink to="/forms">Forms</NavLink>}
           {can('atoms:write') && <NavLink to="/requests">My requests</NavLink>}
           {can('atoms:approve') && (
             <NavLink to="/review">
@@ -66,6 +69,8 @@ export default function App() {
           <Route path="/atoms/new" element={<AtomEdit />} />
           <Route path="/atoms/:id" element={<AtomDetail />} />
           <Route path="/atoms/:id/edit" element={<AtomEdit />} />
+          <Route path="/forms" element={<FormList />} />
+          <Route path="/forms/:id" element={<FormBuilder />} />
           <Route path="/requests" element={<MyRequests />} />
           <Route path="/requests/:id" element={<ChangeRequestPage />} />
           <Route path="/review" element={<ReviewQueue />} />

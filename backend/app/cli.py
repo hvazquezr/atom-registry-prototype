@@ -19,6 +19,7 @@ from app.models import FieldDefinition, RelationType, User
 from app.services import atoms as atom_service
 from app.services import change_requests as cr_service
 from app.services import fields as field_service
+from app.services import forms as form_service
 from app.services import relations as rel_service
 
 BUILT_IN_FIELDS = [
@@ -27,6 +28,14 @@ BUILT_IN_FIELDS = [
     {"key": "description", "label": "Description", "type": "text", "required": False, "config": {"max_length": 5000},
      "description": "What the atom represents and how it is used."},
 ]
+
+# A CEL condition on the other atom's answer, e.g. `value == true`. Empty means "is answered".
+REQUIRED_IF_CONDITION = {
+    "key": "condition", "label": "Condition", "type": "text", "expression": True,
+    "config": {"max_length": 500, "placeholder": "value == true"},
+    "description": "When the other atom's answer makes this one required, as a CEL expression over value. "
+                   "Leave empty to mean \"when it is answered\".",
+}
 
 RELATION_TYPES = [
     {"key": "dependency", "label": "Depends on", "inverse_label": "Dependency of",
@@ -37,7 +46,8 @@ RELATION_TYPES = [
      "allow_cycles": False, "require_note": True},
     {"key": "required_if", "label": "Required if", "inverse_label": "Makes required",
      "description": "This atom becomes required when the other atom is present or answered.", "directed": True,
-     "cardinality": "many_to_many", "allow_cycles": True, "require_note": True},
+     "cardinality": "many_to_many", "allow_cycles": True, "require_note": True,
+     "attributes": [REQUIRED_IF_CONDITION]},
 ]
 
 DEMO_FIELDS = [
@@ -77,8 +87,21 @@ DEMO_RELATIONS = [
     ("Full name", "dependency", "First name", "Built from the first name."),
     ("Full name", "dependency", "Last name", "Built from the last name."),
     ("Full name", "includes", "Middle name", "Shown between first and last name when present."),
-    ("Middle name", "required_if", "Has middle name", "Ask only when the person says they have one."),
+    ("Middle name", "required_if", "Has middle name", "Ask only when the person says they have one.",
+     {"condition": "value == true"}),
 ]
+
+
+
+def _demo_form_sections(ids: dict) -> list[dict]:
+    def item(name, **kw):
+        return {"atom_id": str(ids[name]), **kw}
+
+    return [
+        {"title": "Name", "items": [item("First name", required=True), item("Last name", required=True),
+                                    item("Full name"), item("Has middle name"), item("Middle name")]},
+        {"title": "Finance", "items": [item("Annual income", help_text="Before tax, in USD.")]},
+    ]
 
 
 def _user(db: Session, username: str, display: str, roles: list[str], password: str) -> User:
@@ -119,10 +142,14 @@ def seed(db: Session, demo: bool = False, password: str | None = None) -> dict:
             cr = cr_service.submit(db, editor, "create", values=values, comment="Demo data")
             _, atom = cr_service.approve(db, reviewer, cr)
             ids[values["name"]] = atom.id
-        for src, rtype, tgt, note in DEMO_RELATIONS:
-            cr = cr_service.submit(db, editor, "update", atom_id=ids[src],
-                                   relations={"add": [{"type": rtype, "target_atom_id": str(ids[tgt]), "note": note}]})
+        for src, rtype, tgt, note, *attrs in DEMO_RELATIONS:
+            add = {"type": rtype, "target_atom_id": str(ids[tgt]), "note": note, "attributes": attrs[0] if attrs else {}}
+            cr = cr_service.submit(db, editor, "update", atom_id=ids[src], relations={"add": [add]})
             cr_service.approve(db, reviewer, cr)
+        # a published demo form built from the atoms above
+        form = form_service.create_form(db, editor, "person_details", "Person details",
+                                        "Basic details about a person.", _demo_form_sections(ids))
+        _, _ = cr_service.approve(db, reviewer, form_service.submit_request(db, editor, form, "publish_form", "First version"))
         # one pending request so the review queue isn't empty
         cr_service.submit(db, editor, "update", atom_id=ids["Annual income"],
                           values={"max_length": 12, "description": "Gross yearly income in USD, before tax."},

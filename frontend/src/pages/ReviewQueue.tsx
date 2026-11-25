@@ -4,18 +4,22 @@ import { api, type ChangeRequest } from '../api'
 import ErrorBox from '../components/ErrorBox'
 import { formatDate } from '../hooks'
 
+export function kindLabel(kind: ChangeRequest['kind']): string {
+  return { publish_form: 'publish', deprecate_form: 'deprecate', restore_form: 'restore' }[kind as string] ?? kind
+}
+
 export function RequestTable({ rows, empty }: { rows: ChangeRequest[] | undefined; empty: string }) {
   return (
     <div className="card flush">
       <table className="table">
         <thead>
-          <tr><th>Change</th><th>Atom</th><th>Submitted</th><th>Status</th></tr>
+          <tr><th>Change</th><th>Atom or form</th><th>Submitted</th><th>Status</th></tr>
         </thead>
         <tbody>
           {rows?.map((cr) => (
             <tr key={cr.id}>
               <td>
-                <Link to={`/requests/${cr.id}`} className="strong">{cr.kind}</Link>
+                <Link to={`/requests/${cr.id}`} className="strong">{kindLabel(cr.kind)}</Link>
                 {Object.keys(cr.proposed_values).length > 0 && cr.kind === 'update' && (
                   <span className="muted small"> {Object.keys(cr.proposed_values).join(', ')}</span>
                 )}
@@ -24,7 +28,15 @@ export function RequestTable({ rows, empty }: { rows: ChangeRequest[] | undefine
                 )}
                 {cr.comment && <div className="muted small clamp">{cr.comment}</div>}
               </td>
-              <td>{cr.atom_id ? <Link to={`/atoms/${cr.atom_id}`}>{cr.atom_name}</Link> : <span>{cr.atom_name} <span className="pill blue">new</span></span>}</td>
+              <td>
+                {cr.form_id ? (
+                  <span><Link to={`/forms/${cr.form_id}`}>{cr.form_name}</Link> <span className="pill gray">form</span></span>
+                ) : cr.atom_id ? (
+                  <Link to={`/atoms/${cr.atom_id}`}>{cr.atom_name}</Link>
+                ) : (
+                  <span>{cr.atom_name} <span className="pill blue">new</span></span>
+                )}
+              </td>
               <td className="small">{cr.submitted_by_name}<div className="muted">{formatDate(cr.submitted_at)}</div></td>
               <td>
                 <span className={`pill ${cr.status}`}>{cr.status}</span>

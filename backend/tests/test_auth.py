@@ -37,4 +37,4 @@ def test_admin_creates_service_account_with_token(client, admin):
     r = admin.post("/internal/users", json={"username": "forms-service", "roles": ["editor"], "is_service_account": True})
     assert r.status_code == 201
     t = admin.post("/internal/tokens", json={"name": "forms", "user_id": r.json()["id"]})
-    assert t.status_code == 201 and set(t.json()["scopes"]) == {"atoms:read", "atoms:write"}
+    assert t.status_code == 201 and set(t.json()["scopes"]) == {"atoms:read", "atoms:write", "forms:read", "forms:write"}

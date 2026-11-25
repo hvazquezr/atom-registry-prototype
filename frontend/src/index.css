@@ -174,3 +174,31 @@ pre.token { background: #141b26; color: #e6edf6; padding: 10px; border-radius: 6
 .login-card { width: 340px; }
 .login-card h1 { margin-bottom: 16px; }
 .login-card button { width: 100%; justify-content: center; }
+
+/* Forms */
+.form-section .section-title { font-size: 16px; font-weight: 600; border: 1px solid transparent; background: transparent; padding: 4px 6px; margin-left: -6px; }
+.form-section .section-title:hover:not(:disabled), .form-section .section-title:focus { border-color: var(--line); background: #fff; }
+.form-section .section-desc { width: 100%; border: 1px solid transparent; background: transparent; padding: 2px 6px; margin: 0 0 8px -6px; }
+.form-section .section-desc:focus { border-color: var(--line); background: #fff; }
+.form-item { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin: 6px 0; background: #fff; }
+.form-item.child { margin-left: 28px; border-left: 3px solid var(--accent-soft); }
+.form-item.deprecated { background: #fdf3f2; }
+.form-item[draggable="true"] { cursor: grab; }
+.form-item .grip { color: #b5bcc7; cursor: grab; user-select: none; }
+.item-edit { border-top: 1px dashed var(--line); margin-top: 8px; padding-top: 8px; }
+button.icon { padding: 2px 7px; min-width: 0; }
+.drop-hint { border: 1px dashed var(--line); border-radius: 8px; padding: 12px; text-align: center; margin: 6px 0; }
+.add-atom { margin-top: 8px; max-width: 420px; }
+.issues { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; }
+.issues li { font-size: 13px; }
+.issues .pill { margin-left: 0; margin-bottom: 2px; }
+.preview-section { border: none; border-top: 1px solid var(--line); padding: 12px 0 4px; margin: 12px 0 0; }
+.preview-section legend { font-weight: 600; padding-right: 8px; }
+.preview-item.child { margin-left: 24px; }
+.preview-item.conditional { border-left: 3px solid #f2dfb5; padding-left: 10px; }
+pre.json { background: #f7f8fa; border: 1px solid var(--line); border-radius: 6px; padding: 8px; font-size: 12px; max-height: 320px; overflow: auto; }
+.table.compact td, .table.compact th { padding: 4px 8px; }
+details.card > summary { cursor: pointer; }
+.form-item > .row.spread { flex-wrap: nowrap; align-items: flex-start; }
+.form-item > .row.spread > .row:first-child { flex-wrap: nowrap; flex: 1; min-width: 0; align-items: flex-start; }
+.form-item > .row.spread > .row:last-child { flex-wrap: nowrap; }

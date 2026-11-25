@@ -10,8 +10,14 @@ token-protected API to search, read, create and update them.
   draft and become live when the schema is published as a new version.
 - **Relations.** Typed links between atoms: *Depends on*, *Includes* and *Required if* out of the box,
   each with a note. Admins can add types with their own direction, cardinality and loop rules.
-- **Reviews.** Every create, edit, relation change or deprecation is a change request. Anyone with
-  the reviewer role can approve it, except the person who submitted it.
+- **Forms.** Atoms grouped into ordered sections. Editors change a form's draft freely; publishing a
+  version is a change request. Relations shape the form: *Depends on* pulls in the atoms an atom needs,
+  *Includes* groups atoms under their parent, and *Required if* hides an atom until another answer
+  meets the link's condition (e.g. `value == true`). Published versions are frozen, pinning each atom's
+  revision.
+- **Reviews.** Every create, edit, relation change or deprecation of an atom, and every publish or
+  deprecation of a form, is a change request. Anyone with the reviewer role can approve it, except the
+  person who submitted it.
 - **History.** Every approved change writes a full revision (values and relations).
 
 ## Run it
@@ -64,6 +70,9 @@ Other systems ─/api/v1─┘
 | `atom_relation` | Edges: type, source, target, note, attributes |
 | `change_request` | Proposed values and relation changes, base revision, review outcome |
 | `atom_revision` | Snapshot of values and relations after each approved change |
+| `form`, `form_section`, `form_item` | A form's draft: sections, the atoms in them, and per-form label, help text and "always required" |
+| `form_version` | A published form, fully resolved: items, input rules, conditions, pinned atom revisions and values |
+| `app_setting` | Admin settings, such as which atom fields decide a form input's type and rules |
 | `app_user`, `api_token` | Users with roles; hashed tokens with scopes |
 
 **Validation** runs on submission and again on approval: unknown or read-only keys, required, type,
@@ -83,6 +92,25 @@ atoms in the background.
 and no loops for types that refuse them. `GET /api/v1/atoms/{id}/graph?depth=3` walks the links with
 a recursive query.
 
+**Forms** are checked every time the draft is saved, and the checks are shown in the builder:
+
+| Check | Effect |
+| --- | --- |
+| An atom *Depends on* an atom that isn't on the form | Blocks publishing (one click adds it) |
+| An atom is *Required if* an atom that isn't on the form | Blocks publishing (one click adds it) |
+| A deprecated atom, an empty form, a conditional atom also marked "always required", or atoms that are only *Required if* each other (never shown) | Blocks publishing |
+| An atom *Includes* an atom that isn't on the form, a trigger placed after the atom it controls, an empty section | Warning |
+
+Each atom becomes an input whose type and rules come from the atom's own values. By default the
+`data_type` field picks the type (`string`→text, `integer`, `decimal`→number, `date`, `boolean`→yes/no)
+and `max_length` limits text. Schema admins change this mapping under *Forms → How atoms become
+questions*. A *Required if* link carries an optional CEL `condition` over `value`, the other atom's
+answer; without one it means "when the other atom is answered". When that holds, the atom is shown and
+required; otherwise it's hidden and its answer is ignored.
+
+When an atom changes after a form is published, the published version keeps the old revision and the
+form page offers to publish a new version with the update.
+
 ## Auth
 
 Send `Authorization: Bearer <token>` on every request. The web app gets a session token from
@@ -91,9 +119,9 @@ or with `POST /internal/tokens`. A token can have fewer scopes than its user, ne
 
 | Role | Scopes |
 | --- | --- |
-| viewer | `atoms:read` |
-| editor | `atoms:read`, `atoms:write` (submit change requests) |
-| reviewer | `atoms:read`, `atoms:approve` |
+| viewer | `atoms:read`, `forms:read` |
+| editor | `atoms:read`, `atoms:write` (submit change requests), `forms:read`, `forms:write` (build forms, submit them) |
+| reviewer | `atoms:read`, `atoms:approve` (atoms and forms), `forms:read` |
 | admin | all, including `schema:admin` and `users:admin` |
 
 An external identity provider (OIDC/JWT) can be added later in `app/auth.py` without changing routes.
@@ -116,6 +144,23 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
 # propose an edit (only the fields that change; null clears one)
 curl -X PATCH -H "Authorization: Bearer $TOKEN" -H "If-Match: 3" -H "Content-Type: application/json" \
   localhost:8000/api/v1/atoms/<uuid> -d '{"values": {"max_length": 320}}'
+
+# forms: the resolved form, ready to render (a version number, latest, or draft)
+curl -H "Authorization: Bearer $TOKEN" localhost:8000/api/v1/forms/person_details/versions/latest
+
+# check answers: returns visible/required questions, cleaned answers and errors (nothing is stored)
+curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  localhost:8000/api/v1/forms/person_details/validate -d '{
+    "answers": {"first_name": "Ada", "last_name": "Lovelace", "has_middle_name": true}
+  }'
+# → {"valid": false, "errors": [{"field": "middle_name", "code": "required", ...}], ...}
+
+# build and publish a form (publishing opens a change request for a reviewer)
+curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  localhost:8000/api/v1/forms -d '{"key": "signup", "name": "Signup",
+    "sections": [{"title": "You", "items": [{"atom_id": "<uuid>", "required": true}]}]}'
+curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  localhost:8000/api/v1/forms/signup/publish -d '{"notes": "First version"}'
 ```
 
 Filter operators: `eq` (default), `ne`, `in` (comma-separated), `gt`, `gte`, `lt`, `lte`,
